@@ -127,8 +127,8 @@ def option():
                         type=str, default='./datasets/UFO120/test/lrd',
                         help='UFO-120 test input images')
     parser.add_argument('--data_val_euvp',
-                        type=str, default='./datasets/EUVP/Paired/underwater_imagenet/testA',
-                        help='EUVP test-set input images')
+                        type=str, default='./datasets/EUVP/Paired/underwater_imagenet/validation',
+                        help='EUVP unpaired validation images (no GT available)')
     parser.add_argument('--data_val_u45',
                         type=str, default='./datasets/U45',
                         help='U45 no-reference evaluation images')
@@ -143,8 +143,8 @@ def option():
                         type=str, default='./datasets/UFO120/test/hr',
                         help='UFO-120 test ground-truth images')
     parser.add_argument('--data_valgt_euvp',
-                        type=str, default='./datasets/EUVP/Paired/underwater_imagenet/testB',
-                        help='EUVP test-set ground-truth images')
+                        type=str, default='',
+                        help='EUVP ground-truth (empty: EUVP validation is unpaired, no GT)')
 
     # ------------------------------------------------------------------
     # Output
