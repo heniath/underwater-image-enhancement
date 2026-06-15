@@ -314,7 +314,7 @@ def main():
 
     print(f"Train set : {len(train_ds)} samples  "
           f"({len(train_loader)} batches of {args.batchSize})")
-    print(f"Val set   : {len(val_paired_ds)} samples")
+    print(f"Val set   : {len(val_ds)} samples")
 
     # ------------------------------------------------------------------
     # Loss
