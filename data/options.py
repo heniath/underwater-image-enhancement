@@ -22,7 +22,7 @@ def option():
     # Core training hyper-parameters
     # ------------------------------------------------------------------
     parser.add_argument('--batchSize',    type=int,   default=16,
-                        help='Training mini-batch size (proposal §4.5)')
+                        help='Training mini-batch size')
     parser.add_argument('--cropSize',     type=int,   default=256,
                         help='Resize target size for training images (height=width)')
     parser.add_argument('--nEpochs',      type=int,   default=200,
@@ -34,8 +34,10 @@ def option():
     parser.add_argument('--lr',           type=float, default=1e-4,
                         help='Initial learning rate (Adam)')
     parser.add_argument('--weight_decay', type=float, default=1e-5,
-                        help='Adam weight decay (notebook default: 1e-5)')
+                        help='Adam weight decay')
     parser.add_argument('--gpu_mode',     type=_str2bool, default=True)
+    parser.add_argument('--num_gpus',     type=int,       default=1,
+                        help='Number of GPUs to use via DataParallel (1 = single GPU)')
     parser.add_argument('--shuffle',      type=_str2bool, default=True)
     parser.add_argument('--threads',      type=int,   default=8,
                         help='DataLoader worker threads')
@@ -48,9 +50,9 @@ def option():
     parser.add_argument('--cos_restart_cyclic', type=_str2bool, default=False,
                         help='Use cyclic cosine restart variant')
     parser.add_argument('--scheduler_step',    type=int,   default=30,
-                        help='StepLR step size in epochs (notebook default: 30)')
+                        help='StepLR step size in epochs')
     parser.add_argument('--scheduler_gamma',   type=float, default=0.5,
-                        help='StepLR decay factor (notebook default: 0.5)')
+                        help='StepLR decay factor')
     parser.add_argument('--warmup_epochs',     type=int,   default=0,
                         help='Number of linear warm-up epochs')
     parser.add_argument('--start_warmup',      type=_str2bool, default=False,

@@ -123,11 +123,16 @@ class EarlyStopping:
 # Checkpoint helpers
 # ============================================================
 
+def _unwrap(model):
+    """Return the bare nn.Module, stripping DataParallel if present."""
+    return model.module if isinstance(model, nn.DataParallel) else model
+
+
 def save_ckpt(model, optimizer, epoch, metrics, path):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     torch.save({
         "epoch":     epoch,
-        "model":     model.state_dict(),
+        "model":     _unwrap(model).state_dict(),
         "optimizer": optimizer.state_dict(),
         "metrics":   metrics,
     }, path)
@@ -135,7 +140,7 @@ def save_ckpt(model, optimizer, epoch, metrics, path):
 
 def load_ckpt(path, model, optimizer=None, device="cpu"):
     ckpt = torch.load(path, map_location=device)
-    model.load_state_dict(ckpt["model"])
+    _unwrap(model).load_state_dict(ckpt["model"])
     if optimizer and "optimizer" in ckpt:
         optimizer.load_state_dict(ckpt["optimizer"])
     return ckpt["epoch"], ckpt.get("metrics", {})
@@ -255,7 +260,20 @@ def main():
     # Model
     # ------------------------------------------------------------------
     model = build_model(args.model, pretrained_backbone=args.pretrained_backbone).to(device)
+
+    # ------------------------------------------------------------------
+    # Multi-GPU  (DataParallel)
+    # ------------------------------------------------------------------
+    n_available = torch.cuda.device_count()
+    n_gpus      = min(args.num_gpus, n_available) if device.type == "cuda" else 1
+    if n_gpus > 1:
+        gpu_ids = list(range(n_gpus))
+        model   = nn.DataParallel(model, device_ids=gpu_ids)
+        print(f"GPUs      : {n_gpus}  (DataParallel on {gpu_ids})")
+    else:
+        print(f"GPUs      : 1  (single)")
     print(f"Model     : {args.model}  (in_channels={in_channels}, physics={physics_mode})")
+
 
     # ------------------------------------------------------------------
     # Datasets & DataLoaders
