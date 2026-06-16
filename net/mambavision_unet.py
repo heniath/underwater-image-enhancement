@@ -212,9 +212,7 @@ def _load_hf_backbone(model_size: str, pretrained: bool) -> nn.Module:
     # Workaround for Kaggle transformers version mismatch looking for all_tied_weights_keys
     import transformers
     if not hasattr(transformers.PreTrainedModel, "all_tied_weights_keys"):
-        transformers.PreTrainedModel.all_tied_weights_keys = property(
-            lambda self: getattr(self, "_tied_weights_keys", [])
-        )
+        transformers.PreTrainedModel.all_tied_weights_keys = property(lambda self: {})
 
     try:
         if pretrained:
