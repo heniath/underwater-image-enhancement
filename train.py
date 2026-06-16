@@ -364,8 +364,9 @@ def main():
     # overwrite each other.
     # ------------------------------------------------------------------
     start_epoch = 1
-    RUN_ID    = (args.run_name.strip() or
-                 f"{args.model}_{args.dataset}_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+    RUN_TS    = datetime.now().strftime('%Y%m%d_%H%M%S')
+    RUN_ID    = (f"{args.run_name.strip()}_{RUN_TS}" if args.run_name.strip()
+                 else f"{args.model}_{args.dataset}_{RUN_TS}")
     CKPT_DIR  = os.path.join(args.checkpoint_dir, RUN_ID)
     BEST_PATH = os.path.join(CKPT_DIR, "best_model.pth")
     LAST_PATH = os.path.join(CKPT_DIR, "last_model.pth")
