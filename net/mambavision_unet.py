@@ -199,7 +199,7 @@ def _load_hf_backbone(model_size: str, pretrained: bool) -> nn.Module:
 
     hf_id = _SIZE_TO_HF_ID[model_size]
     if pretrained:
-        hf_model = AutoModel.from_pretrained(hf_id, trust_remote_code=True)
+        hf_model = AutoModel.from_pretrained(hf_id, trust_remote_code=True, low_cpu_mem_usage=False)
     else:
         cfg      = AutoConfig.from_pretrained(hf_id, trust_remote_code=True)
         hf_model = AutoModel.from_config(cfg, trust_remote_code=True)
