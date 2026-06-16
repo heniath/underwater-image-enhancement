@@ -33,6 +33,11 @@ def option():
                         help='Path to a checkpoint .pth to resume training from '
                              '(overrides --start_epoch logic). Example: '
                              '--resume ./checkpoints/run/epoch_0040.pth')
+    parser.add_argument('--run_name',      type=str,   default='',
+                        help='Fixed run name used as the checkpoint subdirectory '
+                             '(no timestamp appended). Omit to auto-generate '
+                             '<model>_<dataset>_<YYYYMMDD_HHMMSS>. '
+                             'Example: --run_name unet5ch_euvp_run1')
     parser.add_argument('--snapshots',    type=int,   default=10,
                         help='Save a checkpoint every N epochs')
     parser.add_argument('--lr',           type=float, default=1e-4,

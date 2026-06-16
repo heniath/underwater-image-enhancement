@@ -357,12 +357,15 @@ def main():
           f"  (warmup={args.warmup_epochs if args.start_warmup else 0} epochs)")
 
     # ------------------------------------------------------------------
-    # Checkpoint directory  –  timestamped per run
-    # Layout: <checkpoint_dir>/<model>_<dataset>_<YYYYMMDD_HHMMSS>/
+    # Checkpoint directory
+    # If --run_name is set the directory is predictable (no timestamp),
+    # which makes it easy to resume:  --resume <dir>/epoch_0040.pth
+    # Without --run_name a timestamp is appended so parallel runs don't
+    # overwrite each other.
     # ------------------------------------------------------------------
     start_epoch = 1
-    RUN_TS    = datetime.now().strftime("%Y%m%d_%H%M%S")
-    RUN_ID    = f"{args.model}_{args.dataset}_{RUN_TS}"
+    RUN_ID    = (args.run_name.strip() or
+                 f"{args.model}_{args.dataset}_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
     CKPT_DIR  = os.path.join(args.checkpoint_dir, RUN_ID)
     BEST_PATH = os.path.join(CKPT_DIR, "best_model.pth")
     LAST_PATH = os.path.join(CKPT_DIR, "last_model.pth")
