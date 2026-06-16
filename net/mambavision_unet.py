@@ -208,6 +208,14 @@ def _load_hf_backbone(model_size: str, pretrained: bool) -> nn.Module:
         return orig_linspace(*args, **kwargs)
     
     torch.linspace = patched_linspace
+    
+    # Workaround for Kaggle transformers version mismatch looking for all_tied_weights_keys
+    import transformers
+    if not hasattr(transformers.PreTrainedModel, "all_tied_weights_keys"):
+        transformers.PreTrainedModel.all_tied_weights_keys = property(
+            lambda self: getattr(self, "_tied_weights_keys", [])
+        )
+
     try:
         if pretrained:
             hf_model = AutoModel.from_pretrained(hf_id, trust_remote_code=True, low_cpu_mem_usage=False)
