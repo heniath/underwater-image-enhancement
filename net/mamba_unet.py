@@ -61,15 +61,12 @@ def _ssm_scan_chunked(
     """
     Chunked prefix-product SSM scan.
 
-    Avoids a Python loop over every token (4 096 iters at the first stage)
-    by processing the sequence in chunks of ``chunk_size`` (default 64).
-    Within each chunk all computation is fully parallel (cumsum, cumprod).
-    A single (B, d_inner, d_state) state tensor is carried between chunks
-    (64 sequential carry-over steps for L = 4 096, vs. 4 096 naive).
+    Memory-efficient design: deltaA and deltaB_u are computed *inside*
+    each chunk loop iteration, so peak memory is O(chunk_size) not O(L).
 
-    Float32 is safe within a chunk of 64:
-      worst-case prefix-product underflow (deltaA ≈ 0.2 → 0.2^64 ≈ 1.8e-45)
-      physically represents a near-zero state, which is numerically correct.
+    At enc1 (B=16, d_inner=192, L=4096, d_state=16):
+      Naïve pre-compute: (16, 192, 4096, 16) × 2 ≈ 1.6 GB just for those tensors.
+      Chunked (chunk=64): (16, 192, 64, 16) × 2 ≈ 25 MB — 64× less.
 
     Returns: y  (B, d_inner, L)
     """
@@ -86,42 +83,38 @@ def _ssm_scan_chunked(
     delta = F.softplus(delta)
 
     B_sz, d_in, L = u.shape
-    n              = A.shape[1]
-
-    # Discretise (ZOH): deltaA ∈ (0, 1), deltaB_u ∈ ℝ
-    deltaA   = torch.exp(torch.einsum("bdl,dn->bdln", delta, A))  # (B, d_in, L, n)
-    deltaB_u = torch.einsum("bdl,bnl,bdl->bdln", delta, B, u)    # (B, d_in, L, n)
 
     ys      = []
-    x_state = u.new_zeros(B_sz, d_in, n)   # carry-over hidden state
+    x_state = u.new_zeros(B_sz, d_in, A.shape[1])   # (B, d_in, n)
 
     for start in range(0, L, chunk_size):
-        end  = min(start + chunk_size, L)
+        end = min(start + chunk_size, L)
 
-        dA   = deltaA  [:, :, start:end, :]   # (B, d_in, T, n)
-        dBu  = deltaB_u[:, :, start:end, :]   # (B, d_in, T, n)
+        u_c     = u    [:, :, start:end]           # (B, d_in, T)
+        delta_c = delta[:, :, start:end]           # (B, d_in, T)
+        B_c     = B    [:, :, start:end]           # (B, n,    T)
+        C_c     = C    [:, :, start:end]           # (B, n,    T)
 
-        # Parallel prefix product within chunk: A_pfx[t] = Π_{k≤t} dA[k]
-        A_pfx = torch.cumprod(dA, dim=2)                    # (B, d_in, T, n)
+        # Discretise only this chunk — (B, d_in, T, n), T ≤ chunk_size
+        dA  = torch.exp(torch.einsum("bdl,dn->bdln", delta_c, A))
+        dBu = torch.einsum("bdl,bnl,bdl->bdln", delta_c, B_c, u_c)
 
-        # Vectorised recurrence (zero initial state for the chunk):
-        #   x_zero[t] = A_pfx[t] · Σ_{s≤t} dBu[s] / A_pfx[s]
+        # Parallel prefix product within the chunk
+        A_pfx = torch.cumprod(dA, dim=2)            # (B, d_in, T, n)
+
+        # Vectorised recurrence (zero initial state) + carried-over state
         A_pfx_safe  = A_pfx.clamp(min=1e-30)
-        scaled_bu   = dBu / A_pfx_safe                      # may be large but bounded in fp32
-        x_from_zero = A_pfx * torch.cumsum(scaled_bu, dim=2)
+        x_from_zero = A_pfx * torch.cumsum(dBu / A_pfx_safe, dim=2)
+        x_chunk     = x_from_zero + A_pfx * x_state.unsqueeze(2)
 
-        # Add carried-over state (A_pfx[t] · x_state propagates it forward in time)
-        x_chunk = x_from_zero + A_pfx * x_state.unsqueeze(2)  # (B, d_in, T, n)
-
-        # Carry state to next chunk
-        x_state = x_chunk[:, :, -1, :]                      # (B, d_in, n)
+        # Update carry
+        x_state = x_chunk[:, :, -1, :]             # (B, d_in, n)
 
         # Output: y[t] = Σ_n C[t, n] · x[t, n]
-        C_chunk = C[:, :, start:end]                         # (B, n, T)
-        y_chunk = torch.einsum("bdtn,bnt->bdt", x_chunk, C_chunk)  # (B, d_in, T)
+        y_chunk = torch.einsum("bdtn,bnt->bdt", x_chunk, C_c)
         ys.append(y_chunk)
 
-    y = torch.cat(ys, dim=2)                                 # (B, d_in, L)
+    y = torch.cat(ys, dim=2)                        # (B, d_in, L)
     y = y + u * D.unsqueeze(0).unsqueeze(-1)
     return y.to(dtype_in)
 
