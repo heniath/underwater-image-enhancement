@@ -107,8 +107,10 @@ def _ssm_scan_chunked(
         x_from_zero = A_pfx * torch.cumsum(dBu / A_pfx_safe, dim=2)
         x_chunk     = x_from_zero + A_pfx * x_state.unsqueeze(2)
 
-        # Update carry
-        x_state = x_chunk[:, :, -1, :]             # (B, d_in, n)
+        # Update carry — detach to truncate BPTT at chunk boundaries.
+        # Gradients still flow within each chunk (64 tokens). This is the
+        # standard memory/gradient trade-off used by Mamba and S4 trainers.
+        x_state = x_chunk[:, :, -1, :].detach()
 
         # Output: y[t] = Σ_n C[t, n] · x[t, n]
         y_chunk = torch.einsum("bdtn,bnt->bdt", x_chunk, C_c)
@@ -316,10 +318,28 @@ class VSSBlock(nn.Module):
 
 
 class VSSStage(nn.Module):
-    """N stacked VSSBlocks operating at a fixed spatial resolution."""
+    """
+    N stacked VSSBlocks operating at a fixed spatial resolution.
 
-    def __init__(self, dim: int, depth: int, d_state: int = 16):
+    Args:
+        dim           (int):  Channel width.
+        depth         (int):  Number of VSSBlocks.
+        d_state       (int):  SSM state dimension.
+        use_checkpoint(bool): If True, use gradient checkpointing to trade
+                              compute for memory (recomputes activations
+                              during backward instead of storing them).
+                              Recommended for heavy stages (enc3, bottleneck).
+    """
+
+    def __init__(
+        self,
+        dim:            int,
+        depth:          int,
+        d_state:        int  = 16,
+        use_checkpoint: bool = False,
+    ):
         super().__init__()
+        self.use_checkpoint = use_checkpoint
         self.blocks = nn.ModuleList(
             [VSSBlock(dim, d_state=d_state) for _ in range(depth)]
         )
@@ -327,7 +347,10 @@ class VSSStage(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """x: (B, H, W, dim)  channel-last."""
         for blk in self.blocks:
-            x = blk(x)
+            if self.use_checkpoint and self.training:
+                x = torch.utils.checkpoint.checkpoint(blk, x, use_reentrant=False)
+            else:
+                x = blk(x)
         return x
 
 
@@ -487,32 +510,34 @@ class MambaUNet(nn.Module):
 
         # ------------------------------------------------------------------
         # Encoder
+        # use_checkpoint=True on the heavy stages (enc3, bottleneck) where
+        # stored activations are largest. Light stages stay off to keep speed.
         # ------------------------------------------------------------------
-        self.enc1  = VSSStage(d0, enc_depths[0], d_state)   # H/4
+        self.enc1  = VSSStage(d0, enc_depths[0], d_state, use_checkpoint=False)
         self.down1 = DownLayer(d0, d1)
 
-        self.enc2  = VSSStage(d1, enc_depths[1], d_state)   # H/8
+        self.enc2  = VSSStage(d1, enc_depths[1], d_state, use_checkpoint=False)
         self.down2 = DownLayer(d1, d2)
 
-        self.enc3  = VSSStage(d2, enc_depths[2], d_state)   # H/16
+        self.enc3  = VSSStage(d2, enc_depths[2], d_state, use_checkpoint=True)
         self.down3 = DownLayer(d2, d3)
 
         # ------------------------------------------------------------------
         # Bottleneck
         # ------------------------------------------------------------------
-        self.bottleneck = VSSStage(d3, enc_depths[3], d_state)  # H/32
+        self.bottleneck = VSSStage(d3, enc_depths[3], d_state, use_checkpoint=True)
 
         # ------------------------------------------------------------------
         # Decoder  (lighter depths; UpLayer handles skip-concat)
         # ------------------------------------------------------------------
         self.up3  = UpLayer(d3, d2, d2)
-        self.dec3 = VSSStage(d2, dec_depths[2], d_state)        # H/16
+        self.dec3 = VSSStage(d2, dec_depths[2], d_state, use_checkpoint=True)
 
         self.up2  = UpLayer(d2, d1, d1)
-        self.dec2 = VSSStage(d1, dec_depths[1], d_state)        # H/8
+        self.dec2 = VSSStage(d1, dec_depths[1], d_state, use_checkpoint=False)
 
         self.up1  = UpLayer(d1, d0, d0)
-        self.dec1 = VSSStage(d0, dec_depths[0], d_state)        # H/4
+        self.dec1 = VSSStage(d0, dec_depths[0], d_state, use_checkpoint=False)
 
         # ------------------------------------------------------------------
         # Head: bilinear ×4 back to full resolution
