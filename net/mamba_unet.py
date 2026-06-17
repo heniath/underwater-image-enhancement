@@ -221,62 +221,70 @@ class SS2D(nn.Module):
         """
         Run SS2D on the convolved feature map.
 
-        Args:
-            x (Tensor): (B, d_inner, H, W)  channel-first after depthwise conv.
+        Memory strategy
+        ---------------
+        Each per-direction scan is wrapped in gradient checkpointing during
+        training. This stores only the scan's inputs and output (~3 x d_in x L
+        floats per direction) rather than all 64 chunks' intermediate tensors
+        (x_chunk, dA, dBu, A_pfx), which previously kept 64 x (B, d_in, 64, n)
+        alive simultaneously for torch.cat's backward.
 
-        Returns:
-            Tensor: (B, d_inner, H, W)  merged scan outputs.
+        At enc1 (B=1, d_inner=192, L=4096) the difference is:
+          Without checkpoint:  64 chunks x 4 tensors x 12 MB  ~= 3 GB per VSSBlock
+          With checkpoint:     4 dirs   x 3 tensors x 12 MB  ~= 144 MB per VSSBlock
         """
         B, C, H, W = x.shape
         L = H * W
 
-        # Build 4 scan sequences, stacked into (B, K, d_inner, L)
+        # Build 4 scan sequences — (B, K, d_inner, L)
         xs = torch.stack([
-            x.reshape(B, C, L),                                # dir 0: raster
-            x.flip(2).reshape(B, C, L),                        # dir 1: flip-H
-            x.flip(3).reshape(B, C, L),                        # dir 2: flip-W
-            x.transpose(2, 3).contiguous().reshape(B, C, L),   # dir 3: transpose
-        ], dim=1)                                               # (B, K, d_inner, L)
+            x.reshape(B, C, L),
+            x.flip(2).reshape(B, C, L),
+            x.flip(3).reshape(B, C, L),
+            x.transpose(2, 3).contiguous().reshape(B, C, L),
+        ], dim=1)
 
-        # Batched x_proj: (B, K, L, d_inner) × (K, d_inner, rank+2n) → (B, K, L, rank+2n)
-        dbc = torch.einsum("bkdl,kde->bkle", xs, self.x_proj_weight)
+        # Batched projections
+        dbc   = torch.einsum("bkdl,kde->bkle", xs, self.x_proj_weight)
+        dt    = torch.einsum(
+            "bkle,ked->bkld",
+            dbc[..., :self.dt_rank],
+            self.dt_proj_weight,
+        ).permute(0, 1, 3, 2)                                       # (B, K, d_inner, L)
+        B_mat = dbc[..., self.dt_rank:self.dt_rank + self.d_state]  # (B, K, L, n)
+        C_mat = dbc[..., self.dt_rank + self.d_state:]              # (B, K, L, n)
 
-        dt_raw = dbc[..., :self.dt_rank]                               # (B, K, L, dt_rank)
-        B_mat  = dbc[..., self.dt_rank:self.dt_rank + self.d_state]    # (B, K, L, d_state)
-        C_mat  = dbc[..., self.dt_rank + self.d_state:]                # (B, K, L, d_state)
+        A = -torch.exp(self.A_log)                                   # (K, d_inner, d_state)
 
-        # dt_proj: (B, K, L, dt_rank) × (K, dt_rank, d_inner) → (B, K, L, d_inner)
-        dt = torch.einsum("bkle,ked->bkld", dt_raw, self.dt_proj_weight)
-        dt = dt.permute(0, 1, 3, 2)   # (B, K, d_inner, L) — scan expects channel-before-L
+        # Per-direction scan — checkpointed during training so only I/O is
+        # retained, not all 64 chunks' intermediate tensors simultaneously.
+        def _one_dir(xk, dtk, Ak, Bk, Ck, Dk, bias_k):
+            return _ssm_scan_chunked(xk, dtk, Ak,
+                                     Bk.permute(0, 2, 1),
+                                     Ck.permute(0, 2, 1),
+                                     Dk, bias_k)
 
-        A = -torch.exp(self.A_log)    # (K, d_inner, d_state)  negative reals
+        def _scan_dir(k):
+            if self.training:
+                return torch.utils.checkpoint.checkpoint(
+                    _one_dir,
+                    xs[:, k], dt[:, k], A[k],
+                    B_mat[:, k], C_mat[:, k],
+                    self.D[k], self.dt_proj_bias[k],
+                    use_reentrant=False,
+                )
+            return _one_dir(
+                xs[:, k], dt[:, k], A[k],
+                B_mat[:, k], C_mat[:, k],
+                self.D[k], self.dt_proj_bias[k],
+            )
 
-        # Run chunked scan per direction and undo permutations
-        y0 = _ssm_scan_chunked(
-            xs[:, 0], dt[:, 0], A[0],
-            B_mat[:, 0].permute(0, 2, 1), C_mat[:, 0].permute(0, 2, 1),
-            self.D[0], self.dt_proj_bias[0],
-        ).reshape(B, C, H, W)
+        y0 = _scan_dir(0).reshape(B, C, H, W)
+        y1 = _scan_dir(1).reshape(B, C, H, W).flip(2)
+        y2 = _scan_dir(2).reshape(B, C, H, W).flip(3)
+        y3 = _scan_dir(3).reshape(B, C, W, H).transpose(2, 3)
 
-        y1 = _ssm_scan_chunked(
-            xs[:, 1], dt[:, 1], A[1],
-            B_mat[:, 1].permute(0, 2, 1), C_mat[:, 1].permute(0, 2, 1),
-            self.D[1], self.dt_proj_bias[1],
-        ).reshape(B, C, H, W).flip(2)  # undo flip-H
-
-        y2 = _ssm_scan_chunked(
-            xs[:, 2], dt[:, 2], A[2],
-            B_mat[:, 2].permute(0, 2, 1), C_mat[:, 2].permute(0, 2, 1),
-            self.D[2], self.dt_proj_bias[2],
-        ).reshape(B, C, H, W).flip(3)  # undo flip-W
-
-        y3 = _ssm_scan_chunked(
-            xs[:, 3], dt[:, 3], A[3],
-            B_mat[:, 3].permute(0, 2, 1), C_mat[:, 3].permute(0, 2, 1),
-            self.D[3], self.dt_proj_bias[3],
-        ).reshape(B, C, W, H).transpose(2, 3)  # undo transpose
-
-        return y0 + y1 + y2 + y3                # (B, d_inner, H, W)
+        return y0 + y1 + y2 + y3
 
     # ------------------------------------------------------------------
     def forward(self, x: torch.Tensor) -> torch.Tensor:
