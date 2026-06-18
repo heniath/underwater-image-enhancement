@@ -43,7 +43,7 @@ def _eval_transform():
 # ---------------------------------------------------------------------------
 
 def get_euvp_training_set(data_dir: str, img_size: int = 256,
-                           subset: str = 'all') -> EUVPDataset:
+                           subset: str = 'all', in_memory: bool = False) -> EUVPDataset:
     """
     Primary training corpus.
 
@@ -53,35 +53,38 @@ def get_euvp_training_set(data_dir: str, img_size: int = 256,
         subset    : 'all' (notebook default, combines all three paired subsets)
                     or one of 'underwater_imagenet' | 'underwater_dark' |
                     'underwater_scenes', or a comma-separated string.
+        in_memory : Load images into RAM during initialization.
     """
     return EUVPDataset(data_dir, subset=subset,
                        transform=_train_transform(img_size),
-                       augment=True)
+                       augment=True, in_memory=in_memory)
 
 
-def get_uieb_training_set(data_dir: str, img_size: int = 256) -> UIEBDataset:
+def get_uieb_training_set(data_dir: str, img_size: int = 256, in_memory: bool = False) -> UIEBDataset:
     """
     UIEB training split (800 pairs by convention).
 
     Args:
         data_dir  : Root of the UIEB release (contains 'raw-890/' etc.).
         img_size  : Resize target. Default: 256.
+        in_memory : Load images into RAM during initialization.
     """
     return UIEBDataset(data_dir, transform=_train_transform(img_size),
-                       augment=True)
+                       augment=True, in_memory=in_memory)
 
 
-def get_ufo120_training_set(data_dir: str, img_size: int = 256) -> UFO120Dataset:
+def get_ufo120_training_set(data_dir: str, img_size: int = 256, in_memory: bool = False) -> UFO120Dataset:
     """
     UFO-120 training split (1 500 high-res AUV pairs).
 
     Args:
         data_dir  : Root of UFO-120 (contains 'train_val/' and 'test/').
         img_size  : Resize target. Default: 256.
+        in_memory : Load images into RAM during initialization.
     """
     return UFO120Dataset(data_dir, split='train',
                          transform=_train_transform(img_size),
-                         augment=True)
+                         augment=True, in_memory=in_memory)
 
 
 # ---------------------------------------------------------------------------

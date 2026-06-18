@@ -284,18 +284,20 @@ def main():
     # Training dataset
     if args.dataset == "euvp":
         train_ds = get_euvp_training_set(
-            args.data_train_euvp, img_size=args.cropSize, subset=args.euvp_subset
+            args.data_train_euvp, img_size=args.cropSize, subset=args.euvp_subset,
+            in_memory=args.in_memory
         )
     elif args.dataset == "uieb":
-        train_ds = get_uieb_training_set(args.data_train_uieb, img_size=args.cropSize)
+        train_ds = get_uieb_training_set(args.data_train_uieb, img_size=args.cropSize, in_memory=args.in_memory)
     elif args.dataset == "ufo120":
         from data.data import get_ufo120_training_set
-        train_ds = get_ufo120_training_set(args.data_train_euvp, img_size=args.cropSize)
+        train_ds = get_ufo120_training_set(args.data_train_euvp, img_size=args.cropSize, in_memory=args.in_memory)
     elif args.dataset == "euvp+uieb":
         euvp_ds = get_euvp_training_set(
-            args.data_train_euvp, img_size=args.cropSize, subset=args.euvp_subset
+            args.data_train_euvp, img_size=args.cropSize, subset=args.euvp_subset,
+            in_memory=args.in_memory
         )
-        uieb_ds = get_uieb_training_set(args.data_train_uieb, img_size=args.cropSize)
+        uieb_ds = get_uieb_training_set(args.data_train_uieb, img_size=args.cropSize, in_memory=args.in_memory)
         train_ds = data.ConcatDataset([euvp_ds, uieb_ds])
     else:
         raise ValueError(f"Unknown --dataset: {args.dataset}")

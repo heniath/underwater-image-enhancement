@@ -15,6 +15,11 @@ from os.path import join
 
 import torchvision.transforms.functional as TF
 
+try:
+    from tqdm import tqdm
+except ImportError:
+    tqdm = lambda x, **kwargs: x
+
 from data.util import is_image_file, load_img
 
 
@@ -40,12 +45,13 @@ class UIEBDataset(data.Dataset):
     INPUT_DIR = 'raw-890'
     GT_DIR    = 'reference-890'
 
-    def __init__(self, data_dir, transform=None, augment=False):
+    def __init__(self, data_dir, transform=None, augment=False, in_memory=False):
         super(UIEBDataset, self).__init__()
         self.input_dir = join(data_dir, self.INPUT_DIR)
         self.gt_dir    = join(data_dir, self.GT_DIR)
         self.transform = transform
         self.augment   = augment
+        self.in_memory = in_memory
 
         # Stem-name matching (robust against ordering differences)
         gt_dict = {
@@ -67,9 +73,18 @@ class UIEBDataset(data.Dataset):
             f"({len(self.input_files)} inputs vs {len(self.gt_files)} GTs)"
         )
 
+        if self.in_memory:
+            print(f"Loading UIEB dataset into memory...")
+            self.input_images = [load_img(f) for f in tqdm(self.input_files, desc="UIEB Inputs")]
+            self.gt_images = [load_img(f) for f in tqdm(self.gt_files, desc="UIEB GTs")]
+
     def __getitem__(self, index):
-        img_in = load_img(self.input_files[index])
-        img_gt = load_img(self.gt_files[index])
+        if self.in_memory:
+            img_in = self.input_images[index]
+            img_gt = self.gt_images[index]
+        else:
+            img_in = load_img(self.input_files[index])
+            img_gt = load_img(self.gt_files[index])
         _, file_in = os.path.split(self.input_files[index])
         _, file_gt = os.path.split(self.gt_files[index])
 
@@ -151,7 +166,7 @@ class EUVPDataset(data.Dataset):
 
     SUBSETS = ('underwater_imagenet', 'underwater_dark', 'underwater_scenes')
 
-    def __init__(self, data_dir, subset='all', transform=None, augment=False):
+    def __init__(self, data_dir, subset='all', transform=None, augment=False, in_memory=False):
         super(EUVPDataset, self).__init__()
 
         # Resolve subset list
@@ -169,6 +184,7 @@ class EUVPDataset(data.Dataset):
 
         self.transform    = transform
         self.augment      = augment
+        self.in_memory    = in_memory
         self.input_files  = []
         self.gt_files     = []
 
@@ -193,9 +209,18 @@ class EUVPDataset(data.Dataset):
                     self.input_files.append(join(input_dir, f))
                     self.gt_files.append(gt_dict[stem])
 
+        if self.in_memory:
+            print(f"Loading EUVP dataset into memory...")
+            self.input_images = [load_img(f) for f in tqdm(self.input_files, desc="EUVP Inputs")]
+            self.gt_images = [load_img(f) for f in tqdm(self.gt_files, desc="EUVP GTs")]
+
     def __getitem__(self, index):
-        img_in = load_img(self.input_files[index])
-        img_gt = load_img(self.gt_files[index])
+        if self.in_memory:
+            img_in = self.input_images[index]
+            img_gt = self.gt_images[index]
+        else:
+            img_in = load_img(self.input_files[index])
+            img_gt = load_img(self.gt_files[index])
         _, file_in = os.path.split(self.input_files[index])
         _, file_gt = os.path.split(self.gt_files[index])
 
@@ -237,7 +262,7 @@ class UFO120Dataset(data.Dataset):
         'test' : ('test/lrd',      'test/hr'),
     }
 
-    def __init__(self, data_dir, split='train', transform=None, augment=False):
+    def __init__(self, data_dir, split='train', transform=None, augment=False, in_memory=False):
         super(UFO120Dataset, self).__init__()
 
         assert split in self.SPLIT_MAP, \
@@ -249,6 +274,7 @@ class UFO120Dataset(data.Dataset):
 
         self.transform = transform
         self.augment   = augment
+        self.in_memory = in_memory
 
         # Stem-name matching
         gt_dict = {
@@ -265,9 +291,18 @@ class UFO120Dataset(data.Dataset):
                 self.input_files.append(join(input_dir, f))
                 self.gt_files.append(gt_dict[stem])
 
+        if self.in_memory:
+            print(f"Loading UFO-120 dataset into memory...")
+            self.input_images = [load_img(f) for f in tqdm(self.input_files, desc="UFO-120 Inputs")]
+            self.gt_images = [load_img(f) for f in tqdm(self.gt_files, desc="UFO-120 GTs")]
+
     def __getitem__(self, index):
-        img_in = load_img(self.input_files[index])
-        img_gt = load_img(self.gt_files[index])
+        if self.in_memory:
+            img_in = self.input_images[index]
+            img_gt = self.gt_images[index]
+        else:
+            img_in = load_img(self.input_files[index])
+            img_gt = load_img(self.gt_files[index])
         _, file_in = os.path.split(self.input_files[index])
         _, file_gt = os.path.split(self.gt_files[index])
 
@@ -299,15 +334,23 @@ class U45Dataset(data.Dataset):
         transform: Applied to input images only.
     """
 
-    def __init__(self, data_dir, transform=None):
+    def __init__(self, data_dir, transform=None, in_memory=False):
         super(U45Dataset, self).__init__()
         self.transform = transform
+        self.in_memory = in_memory
         self.input_files = sorted(
             join(data_dir, f) for f in listdir(data_dir) if is_image_file(f)
         )
 
+        if self.in_memory:
+            print(f"Loading U45 dataset into memory...")
+            self.input_images = [load_img(f) for f in tqdm(self.input_files, desc="U45 Inputs")]
+
     def __getitem__(self, index):
-        img_in = load_img(self.input_files[index])
+        if self.in_memory:
+            img_in = self.input_images[index]
+        else:
+            img_in = load_img(self.input_files[index])
         _, file_in = os.path.split(self.input_files[index])
 
         if self.transform:

@@ -50,6 +50,8 @@ def option():
     parser.add_argument('--shuffle',      type=_str2bool, default=True)
     parser.add_argument('--threads',      type=int,   default=4,
                         help='DataLoader worker threads (keep low to avoid OOM on Kaggle; 2-4 recommended)')
+    parser.add_argument('--in_memory',    type=_str2bool, default=False,
+                        help='Load all images into RAM during initialization')
 
     # ------------------------------------------------------------------
     # Learning-rate scheduler
