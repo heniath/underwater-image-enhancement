@@ -102,9 +102,13 @@ def _ssm_scan_chunked(
         # Parallel prefix product within the chunk
         A_pfx = torch.cumprod(dA, dim=2)            # (B, d_in, T, n)
 
-        # Vectorised recurrence (zero initial state) + carried-over state
+        # Vectorised recurrence (zero initial state) + carried-over state.
+        # Clamp the quotient to ±1e15 so cumsum never overflows to inf:
+        # if A_pfx underflows to 0 in fp32 (possible after 40+ fast-decay steps)
+        # then 0 × inf = NaN; with the clamp, 0 × finite = 0 (correct: state gone).
         A_pfx_safe  = A_pfx.clamp(min=1e-30)
-        x_from_zero = A_pfx * torch.cumsum(dBu / A_pfx_safe, dim=2)
+        safe_ratio  = (dBu / A_pfx_safe).clamp(min=-1e15, max=1e15)
+        x_from_zero = A_pfx * torch.cumsum(safe_ratio, dim=2)
         x_chunk     = x_from_zero + A_pfx * x_state.unsqueeze(2)
 
         # Update carry — detach to truncate BPTT at chunk boundaries.
@@ -170,6 +174,7 @@ class SS2D(nn.Module):
 
         # ---- SSM parameters for K directions (stored as stacked tensors) -
         # x_proj maps d_inner → (dt_rank + 2 * d_state) per direction
+        # NOTE: torch.empty() leaves memory UNINITIALISED — must call init below.
         self.x_proj_weight = nn.Parameter(
             torch.empty(self.K, self.d_inner, dt_rank + 2 * d_state)
         )
@@ -198,20 +203,32 @@ class SS2D(nn.Module):
         self.out_norm = nn.LayerNorm(self.d_inner)
         self.out_proj = nn.Linear(self.d_inner, d_model, bias=False)
 
-        self._init_dt_proj()
+        self._init_weights()
 
     # ------------------------------------------------------------------
-    def _init_dt_proj(self) -> None:
-        """Initialise dt_proj so that dt starts in [0.001, 0.1]."""
-        std = self.dt_rank ** -0.5
-        nn.init.uniform_(self.dt_proj_weight, -std, std)
+    def _init_weights(self) -> None:
+        """
+        Initialise all raw nn.Parameter tensors that torch.empty() left
+        uninitialized.  Missing this step was the primary NaN source:
+        x_proj_weight contained arbitrary garbage → NaN B/C/dt from
+        the very first forward pass.
+        """
+        # x_proj: kaiming_uniform per direction (same as nn.Linear default)
+        for k in range(self.K):
+            nn.init.kaiming_uniform_(
+                self.x_proj_weight[k], a=math.sqrt(5)
+            )
+
+        # dt_proj: small uniform so initial dt is in [0.001, 0.1]
+        dt_std = self.dt_rank ** -0.5
+        nn.init.uniform_(self.dt_proj_weight, -dt_std, dt_std)
         for k in range(self.K):
             dt = torch.exp(
                 torch.rand(self.d_inner)
                 * (math.log(0.1) - math.log(0.001))
                 + math.log(0.001)
             )
-            # inv_softplus: dt = softplus(bias) → bias = log(exp(dt) - 1)
+            # inv_softplus: softplus(bias) = dt  →  bias = log(expm1(dt))
             inv_dt = dt + torch.log(-torch.expm1(-dt))
             with torch.no_grad():
                 self.dt_proj_bias[k].copy_(inv_dt)
