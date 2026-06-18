@@ -16,7 +16,7 @@ from os.path import join
 import torchvision.transforms.functional as TF
 
 try:
-    from tqdm import tqdm
+    from tqdm.auto import tqdm
 except ImportError:
     tqdm = lambda x, **kwargs: x
 

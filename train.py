@@ -155,7 +155,13 @@ def train_epoch(model, loader, optimizer, criterion, device):
     tot_loss = 0.0
     comps    = {"l1": 0.0, "perceptual": 0.0, "ssim_loss": 0.0}
 
-    for inp, gt in loader:
+    try:
+        from tqdm.auto import tqdm
+        loader_pbar = tqdm(loader, desc="Training Batch", leave=False, mininterval=2.0)
+    except ImportError:
+        loader_pbar = loader
+
+    for inp, gt in loader_pbar:
         inp, gt = inp.to(device), gt.to(device)
         optimizer.zero_grad(set_to_none=True)
         pred         = model(inp)
