@@ -17,6 +17,10 @@ import torch.nn.functional as F
 import kornia
 from torchvision.models import vgg16, VGG16_Weights
 
+# ImageNet statistics for VGG normalisation
+_VGG_MEAN = torch.tensor([0.485, 0.456, 0.406])
+_VGG_STD  = torch.tensor([0.229, 0.224, 0.225])
+
 
 # ---------------------------------------------------------------------------
 # VGG Perceptual Loss
@@ -39,6 +43,12 @@ class VGGPerceptualLoss(nn.Module):
         for p in self.parameters():
             p.requires_grad = False
 
+    def _normalise(self, x: torch.Tensor) -> torch.Tensor:
+        """Apply ImageNet mean/std normalisation expected by VGG."""
+        mean = _VGG_MEAN.to(x.device, x.dtype).view(1, 3, 1, 1)
+        std  = _VGG_STD .to(x.device, x.dtype).view(1, 3, 1, 1)
+        return (x - mean) / std
+
     def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         """
         Args:
@@ -48,6 +58,11 @@ class VGGPerceptualLoss(nn.Module):
         Returns:
             Tensor: scalar perceptual loss.
         """
+        # VGG expects ImageNet-normalised inputs; raw [0,1] causes large
+        # intermediate activations that can overflow gradients to NaN.
+        pred   = self._normalise(pred.clamp(0, 1))
+        target = self._normalise(target.clamp(0, 1))
+
         p1 = self.stage1(pred)
         t1 = self.stage1(target)
         p2 = self.stage2(p1)

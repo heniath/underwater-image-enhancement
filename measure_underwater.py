@@ -63,36 +63,35 @@ def compute_ciede2000(pred, target):
 
 def compute_uciqe(image):
     """
-    UCIQE – Underwater Colour Image Quality Evaluation
-    (Yang & Sowmya, 2015).
-
-    image  : numpy (H, W, 3) float32 in [0, 1] RGB
-    Returns: float – higher is better
-
-    Components
-    ----------
-    σ_c   : std of chroma  (Lab A*B* plane)
-    con_L : luminance contrast  (top 1% – bottom 1% of L*)
-    μ_s   : mean saturation  (HSV S channel)
+    UCIQE – Yang & Sowmya (2015).
+    image: (H,W,3) float [0,1] RGB
+    Fix: chuyển OpenCV LAB uint8 → chuẩn CIELab trước khi tính.
     """
-    img_u8  = (image.clip(0, 1) * 255).astype(np.uint8)
-    lab     = cv2.cvtColor(img_u8, cv2.COLOR_RGB2LAB).astype(np.float64)
-    L, A, B = lab[:, :, 0], lab[:, :, 1], lab[:, :, 2]
+    img_u8 = (np.nan_to_num(image, nan=0.0).clip(0, 1) * 255).astype(np.uint8)
 
-    chroma  = np.sqrt(A**2 + B**2)
+    # ── OpenCV LAB uint8 → standard CIELab ──────────────────────
+    # OpenCV:  L ∈ [0,255],  A ∈ [0,255],  B ∈ [0,255]
+    # Standard: L ∈ [0,100], a ∈ [-128,127], b ∈ [-128,127]
+    lab   = cv2.cvtColor(img_u8, cv2.COLOR_RGB2LAB).astype(np.float64)
+    L_std = lab[:, :, 0] * (100.0 / 255.0)   # L: 0 → 100
+    a_std = lab[:, :, 1] - 128.0              # a: -128 → 127
+    b_std = lab[:, :, 2] - 128.0             # b: -128 → 127
+
+    # σc – std của chroma
+    chroma  = np.sqrt(a_std ** 2 + b_std ** 2)
     sigma_c = np.std(chroma)
 
-    sorted_L = np.sort(L.flatten())
+    # con_l – contrast của L (top 1% − bottom 1%), trong [0,100]
+    sorted_L = np.sort(L_std.flatten())
     n        = len(sorted_L)
-    top_L    = np.mean(sorted_L[int(0.99 * n):])
-    bot_L    = np.mean(sorted_L[:max(1, int(0.01 * n))])
-    con_l    = top_L - bot_L
+    con_l    = (np.mean(sorted_L[int(0.99 * n):])
+              - np.mean(sorted_L[:max(1, int(0.01 * n))]))
 
+    # μs – mean saturation HSV ∈ [0,1]
     hsv  = cv2.cvtColor(img_u8, cv2.COLOR_RGB2HSV).astype(np.float64)
     mu_s = np.mean(hsv[:, :, 1]) / 255.0
 
-    c1, c2, c3 = 0.4680, 0.2745, 0.2576
-    return float(c1 * sigma_c + c2 * con_l + c3 * mu_s)
+    return float(0.4680 * sigma_c + 0.2745 * con_l + 0.2576 * mu_s)
 
 
 def compute_uiqm(image):
