@@ -155,13 +155,8 @@ def train_epoch(model, loader, optimizer, criterion, device):
     tot_loss = 0.0
     comps    = {"l1": 0.0, "perceptual": 0.0, "ssim_loss": 0.0}
 
-    try:
-        from tqdm.auto import tqdm
-        loader_pbar = tqdm(loader, desc="Training Batch", leave=False, mininterval=2.0)
-    except ImportError:
-        loader_pbar = loader
-
-    for inp, gt in loader_pbar:
+    # BỎ TQDM, DÙNG ENUMERATE THÔNG THƯỜNG
+    for batch_idx, (inp, gt) in enumerate(loader):
         inp, gt = inp.to(device), gt.to(device)
         optimizer.zero_grad(set_to_none=True)
         pred         = model(inp)
@@ -174,9 +169,12 @@ def train_epoch(model, loader, optimizer, criterion, device):
         for k in comps:
             comps[k] += parts.get(k, 0.0)
 
+        # Chỉ in log ra màn hình mỗi 50 batch để tránh tràn I/O
+        if (batch_idx + 1) % 50 == 0:
+            print(f"   [Batch {batch_idx + 1}/{len(loader)}] Loss: {loss.item():.4f}")
+
     n = len(loader)
     return tot_loss / n, {k: v / n for k, v in comps.items()}
-
 
 @torch.no_grad()
 def val_loss_epoch(model, loader, criterion, device):
