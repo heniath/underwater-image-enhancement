@@ -3,29 +3,221 @@ physics.py
 ----------
 Physics-guided channel extraction for underwater image restoration.
 
-Implements the Underwater Dark Channel Prior (UDCP) pipeline to estimate
-two spatially-varying maps from a raw underwater RGB image:
+This module keeps the existing public API used by train/test code, but the
+default extraction follows the GDCP pipeline bundled with Ucolor:
 
-  t(x)  – transmission map  ∈ [0.1, 1]   (how much light reaches sensor)
-  B_map – background light  (scalar per image, broadcast to H×W)
+  getGrad.m + GetDepth.m -> DepthMap
+  atmLight.m             -> background / ambient light B
+  calcTrans.m            -> transmission map t(x)
 
-These are concatenated to the RGB tensor to form the 5-channel input
-[R, G, B, t(x), B_map] fed into UNet5ch.
-
-References
-----------
-- He et al. (2011) "Single Image Haze Removal Using Dark Channel Prior"
-- Drews et al. (2013) "Transmission Estimation in Underwater Single Images"
-- He et al. (2013) "Guided Image Filtering"
+The model input layout is unchanged:
+  [R, G, B, t(x), B_map]
+where B_map is a scalar background-light map broadcast to HxW.
 """
 
 import cv2
 import numpy as np
-from scipy.ndimage import minimum_filter
+from scipy.ndimage import maximum_filter, median_filter, minimum_filter
+from skimage.morphology import reconstruction
+
+
+def _as_float_rgb(image_np: np.ndarray) -> np.ndarray:
+    """Validate and normalize an RGB image to float32 in [0, 1]."""
+    image = np.asarray(image_np, dtype=np.float32)
+    if image.ndim != 3 or image.shape[2] != 3:
+        raise ValueError(f"Expected image shape (H, W, 3), got {image.shape}")
+    if image.size and image.max() > 1.0:
+        image = image / 255.0
+    return np.clip(image, 0.0, 1.0).astype(np.float32)
+
+
+def _stretch01(x: np.ndarray) -> np.ndarray:
+    """MATLAB Stretch helper with a constant-image guard."""
+    x = np.asarray(x, dtype=np.float32)
+    xmin = float(np.min(x))
+    xmax = float(np.max(x))
+    denom = xmax - xmin
+    if denom <= 1e-12:
+        return np.zeros_like(x, dtype=np.float32)
+    return ((x - xmin) / denom).astype(np.float32)
+
+
+def _fill_holes_gray(image: np.ndarray) -> np.ndarray:
+    """
+    Approximate MATLAB imfill(gray, 8, 'holes') for grayscale images.
+
+    Grayscale hole filling is implemented by reconstruction from an eroded
+    border seed, which is the standard morphology equivalent of imfill.
+    """
+    image = np.asarray(image, dtype=np.float32)
+    seed = image.copy()
+    seed[1:-1, 1:-1] = float(np.max(image))
+    return reconstruction(seed, image, method="erosion").astype(np.float32)
+
+
+def _rgb_to_lab_matlab(image: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Port of GDCP_Release/getRGB2Lab.m."""
+    image = _as_float_rgb(image)
+    r = image[:, :, 0].astype(np.float64)
+    g = image[:, :, 1].astype(np.float64)
+    b = image[:, :, 2].astype(np.float64)
+
+    t = 0.008856
+    h, w = r.shape
+    rgb = np.vstack([r.reshape(1, -1), g.reshape(1, -1), b.reshape(1, -1)])
+    mat = np.array(
+        [
+            [0.412453, 0.357580, 0.180423],
+            [0.212671, 0.715160, 0.072169],
+            [0.019334, 0.119193, 0.950227],
+        ],
+        dtype=np.float64,
+    )
+    xyz = mat @ rgb
+    x = xyz[0, :] / 0.950456
+    y = xyz[1, :]
+    z = xyz[2, :] / 1.088754
+
+    xt = x > t
+    yt = y > t
+    zt = z > t
+    y3 = np.cbrt(y)
+
+    fx = xt * np.cbrt(x) + (~xt) * (7.787 * x + 16.0 / 116.0)
+    fy = yt * y3 + (~yt) * (7.787 * y + 16.0 / 116.0)
+    fz = zt * np.cbrt(z) + (~zt) * (7.787 * z + 16.0 / 116.0)
+
+    lab_l = (yt * (116.0 * y3 - 16.0) + (~yt) * (903.3 * y)).reshape(h, w)
+    lab_a = (500.0 * (fx - fy)).reshape(h, w)
+    lab_b = (200.0 * (fy - fz)).reshape(h, w)
+    return lab_l, lab_a, lab_b
+
+
+def _color_cast_scale(image: np.ndarray) -> np.ndarray:
+    """
+    Port of CC.m/getColorCast.m.
+
+    Ucolor's IR_GDCP.m uses this only for final restoration, not for saving the
+    transmission map. It is kept here for completeness and possible debugging.
+    """
+    image = _as_float_rgb(image)
+    _, lab_a, lab_b = _rgb_to_lab_matlab(image)
+    var_sq = float(np.sqrt(np.var(lab_a) + np.var(lab_b)))
+    if var_sq <= 1e-12:
+        return np.ones(3, dtype=np.float32)
+
+    u = float(np.sqrt(np.mean(lab_a) ** 2 + np.mean(lab_b) ** 2))
+    dl = (u - var_sq) / var_sq
+    if dl <= 0:
+        return np.ones(3, dtype=np.float32)
+
+    avg_ic = np.mean(image.reshape(-1, 3), axis=0)
+    numerator = max(float(np.max(avg_ic)), 0.1)
+    denominator = np.maximum(avg_ic, 0.1)
+    exponent = 1.0 / max(float(np.sqrt(dl)), 1.0)
+    return np.power(numerator / denominator, exponent).astype(np.float32)
 
 
 # ---------------------------------------------------------------------------
-# Background Light Estimation
+# GDCP depth, background light, and transmission estimation
+# ---------------------------------------------------------------------------
+
+def estimate_depth_gdcp(image_np: np.ndarray, win: int = 15) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Estimate the GDCP depth map.
+
+    Port of getGrad.m and GetDepth.m from Ucolor's GDCP_Release.
+    """
+    image = _as_float_rgb(image_np)
+
+    y_channel = cv2.cvtColor(image, cv2.COLOR_RGB2YCrCb)[:, :, 0]
+    grad_x = cv2.Sobel(y_channel, cv2.CV_32F, 1, 0, ksize=3)
+    grad_y = cv2.Sobel(y_channel, cv2.CV_32F, 0, 1, ksize=3)
+    grad_mag = cv2.magnitude(grad_x, grad_y)
+
+    dilated = maximum_filter(grad_mag, size=win, mode="reflect")
+    grad_map = _stretch01(_fill_holes_gray(dilated))
+    rough_depth = 1.0 - grad_map
+
+    dep_vec = rough_depth.reshape(-1).astype(np.float64)
+    im_vec = image.reshape(-1, 3).astype(np.float64)
+    design = np.stack([np.ones_like(dep_vec), dep_vec], axis=1)
+    weights, _, _, _ = np.linalg.lstsq(design, im_vec, rcond=None)
+
+    slopes = weights[1, :]
+    ws = np.tanh(4.0 * np.abs(slopes))
+    signs = (slopes <= 0).astype(np.float64)
+
+    channel_mins = []
+    for channel in range(3):
+        distance = np.abs(signs[channel] - image[:, :, channel])
+        local_min = minimum_filter(distance, size=win, mode="reflect")
+        channel_mins.append(ws[channel] * local_min + (1.0 - ws[channel]))
+
+    depth_map = np.min(np.stack(channel_mins, axis=2), axis=2)
+    return np.clip(depth_map, 0.0, 1.0).astype(np.float32), grad_map.astype(np.float32)
+
+
+def estimate_background_light_gdcp(
+    image_np: np.ndarray,
+    depth_map: np.ndarray | None = None,
+    win: int = 15,
+) -> np.ndarray:
+    """
+    Estimate background / ambient light B_rgb from the GDCP depth map.
+
+    Port of atmLight.m: sort DepthMap, take the top floor(H*W/1000) pixels,
+    and average their RGB values.
+    """
+    image = _as_float_rgb(image_np)
+    if depth_map is None:
+        depth_map, _ = estimate_depth_gdcp(image, win=win)
+
+    depth = np.asarray(depth_map, dtype=np.float32)
+    if depth.shape != image.shape[:2]:
+        raise ValueError(f"Depth map shape {depth.shape} does not match image {image.shape[:2]}")
+
+    imsize = depth.size
+    numpx = max(1, int(np.floor(imsize / 1000.0)))
+    indices = np.argsort(depth.reshape(-1))[-numpx:]
+    b_rgb = np.mean(image.reshape(-1, 3)[indices, :], axis=0)
+    return np.clip(b_rgb, 0.0, 1.0).astype(np.float32)
+
+
+def estimate_transmission_gdcp(
+    image_np: np.ndarray,
+    B: np.ndarray,
+    win: int = 15,
+    t0: float = 0.2,
+) -> np.ndarray:
+    """
+    Estimate transmission map using Ucolor's GDCP calcTrans.m + IR_GDCP.m.
+    """
+    image = _as_float_rgb(image_np)
+    b_rgb = np.asarray(B, dtype=np.float32).reshape(3)
+
+    dl_map = np.abs(b_rgb.reshape(1, 1, 3) - image)
+    bm = np.maximum(b_rgb, 1.0 - b_rgb)
+    bm = np.maximum(bm, 1e-6).reshape(1, 1, 3)
+    dl_map_nor = dl_map / bm
+
+    max_dl = np.max(dl_map_nor, axis=2)
+    trans = median_filter(max_dl, size=win, mode="reflect")
+    trans = np.clip(trans, 0.0, 1.0).astype(np.float32)
+
+    max_t = float(np.max(trans))
+    min_t = float(np.min(trans))
+    denom = max_t - min_t
+    if denom <= 1e-12:
+        trans_pro = np.full_like(trans, float(t0), dtype=np.float32)
+    else:
+        trans_pro = ((trans - min_t) / denom) * (max_t - float(t0)) + float(t0)
+
+    return np.clip(trans_pro, 0.0, 1.0).astype(np.float32)
+
+
+# ---------------------------------------------------------------------------
+# Backward-compatible legacy names
 # ---------------------------------------------------------------------------
 
 def estimate_background_light(
@@ -33,118 +225,34 @@ def estimate_background_light(
     percentile: float = 0.1,
 ) -> np.ndarray:
     """
-    Estimate global background light B via the UDCP strategy.
+    Backward-compatible background light API.
 
-    In underwater imagery the red channel attenuates fastest, so only the
-    green and blue channels are used to locate the dark-channel candidates.
-
-    Args:
-        image_np  (ndarray): (H, W, 3) float32 RGB in [0, 1].
-        percentile (float):  Top-% brightest dark-channel pixels used as
-                             candidates. Default: 0.1.
-
-    Returns:
-        ndarray: shape (3,) float32 – estimated background light.
+    The old implementation used UDCP candidates. The default now follows
+    Ucolor/GDCP; ``percentile`` is accepted to avoid breaking old imports.
     """
-    # Use only G & B since red attenuates fastest underwater
-    dark_gb = np.min(image_np[:, :, 1:], axis=2)   # (H, W)
+    del percentile
+    return estimate_background_light_gdcp(image_np)
 
-    n_pixels = dark_gb.size
-    n_top    = max(1, int(n_pixels * percentile / 100.0))
-    flat_idx = np.argsort(dark_gb.flatten())[-n_top:]
-    h_idx, w_idx = np.unravel_index(flat_idx, dark_gb.shape)
-
-    # Among candidates, pick the brightest overall pixel
-    candidate_intensity = np.mean(image_np[h_idx, w_idx, :], axis=1)
-    best = np.argmax(candidate_intensity)
-    return image_np[h_idx[best], w_idx[best], :].astype(np.float32)
-
-
-# ---------------------------------------------------------------------------
-# Guided Filter (edge-preserving smoothing)
-# ---------------------------------------------------------------------------
-
-def _guided_filter(
-    guide:  np.ndarray,
-    src:    np.ndarray,
-    radius: int   = 15,
-    eps:    float = 1e-3,
-) -> np.ndarray:
-    """
-    Edge-preserving guided image filter (He et al., 2013).
-
-    Args:
-        guide  (ndarray): (H, W) float32 guidance image.
-        src    (ndarray): (H, W) float32 input to be filtered.
-        radius (int):     Filter radius. Default: 15.
-        eps    (float):   Regularisation constant. Default: 1e-3.
-
-    Returns:
-        ndarray: (H, W) float32 filtered output.
-    """
-    guide = guide.astype(np.float64)
-    src   = src.astype(np.float64)
-    ksize = (2 * radius + 1, 2 * radius + 1)
-
-    def box(img: np.ndarray) -> np.ndarray:
-        return cv2.boxFilter(img, -1, ksize)
-
-    N      = box(np.ones_like(guide))
-    mI     = box(guide)       / N
-    mp     = box(src)         / N
-    mIp    = box(guide * src) / N
-    covIp  = mIp - mI * mp
-
-    mII  = box(guide * guide) / N
-    varI = mII - mI * mI
-
-    a  = covIp / (varI + eps)
-    b  = mp - a * mI
-
-    ma = box(a) / N
-    mb = box(b) / N
-    return (ma * guide + mb).astype(np.float32)
-
-
-# ---------------------------------------------------------------------------
-# Transmission Map Estimation
-# ---------------------------------------------------------------------------
 
 def estimate_transmission_udcp(
-    image_np:   np.ndarray,
-    B:          np.ndarray,
-    omega:      float = 0.95,
-    patch_size: int   = 15,
+    image_np: np.ndarray,
+    B: np.ndarray,
+    omega: float = 0.95,
+    patch_size: int = 15,
 ) -> np.ndarray:
     """
-    Estimate spatially-varying transmission map t(x) ∈ [0.1, 1].
+    Backward-compatible transmission API.
 
-    Args:
-        image_np   (ndarray): (H, W, 3) float32 RGB in [0, 1].
-        B          (ndarray): (3,) float32 background light estimate.
-        omega      (float):   Controls how much haze to remove. Default: 0.95.
-        patch_size (int):     Dark-channel minimum-filter patch size. Default: 15.
-
-    Returns:
-        ndarray: (H, W) float32 transmission map clipped to [0.1, 1].
+    Kept under the old name because other modules import it, but it now returns
+    the GDCP transmission map used by Ucolor. ``omega`` is accepted for API
+    compatibility and is not used by GDCP.
     """
-    B_safe     = np.maximum(B, 1e-6)
-    normalized = np.clip(image_np / B_safe, 0.0, 1.0)
-
-    # UDCP: dark channel over green & blue only
-    dark    = np.min(normalized[:, :, 1:], axis=2)
-    dark_ch = minimum_filter(dark, size=patch_size)
-
-    t_rough = np.clip(1.0 - omega * dark_ch, 0.1, 1.0)
-
-    # Edge-preserving refinement via guided filter
-    guide = np.mean(image_np, axis=2).astype(np.float32)
-    t_ref = _guided_filter(guide, t_rough, radius=15, eps=1e-3)
-    return np.clip(t_ref, 0.1, 1.0)
+    del omega
+    return estimate_transmission_gdcp(image_np, B, win=patch_size)
 
 
 # ---------------------------------------------------------------------------
-# Public API
+# Public API used by train/eval/test
 # ---------------------------------------------------------------------------
 
 def compute_physics_maps(
@@ -153,26 +261,17 @@ def compute_physics_maps(
     """
     Compute the two physics-guided extra channels from a float32 RGB image.
 
-    This is the single call used inside ``EUVPDataset.__getitem__`` when
-    ``USE_PHYSICS=True``.  The result is converted to 1-channel tensors
-    and concatenated onto the RGB tensor to form the 5-channel model input.
-
     Args:
         image_np (ndarray): (H, W, 3) float32 RGB image in [0, 1].
 
     Returns:
-        t_map (ndarray): (H, W) float32 – per-pixel transmission map.
-        b_map (ndarray): (H, W) float32 – spatially broadcast scalar
-                         background light (mean of B across channels).
-
-    Example::
-
-        t_map, b_map = compute_physics_maps(img_np)
-        t_t = torch.from_numpy(t_map).unsqueeze(0)  # (1, H, W)
-        b_t = torch.from_numpy(b_map).unsqueeze(0)  # (1, H, W)
-        inp_5ch = torch.cat([rgb_tensor, t_t, b_t], dim=0)  # (5, H, W)
+        t_map (ndarray): (H, W) float32 transmission map from GDCP.
+        b_map (ndarray): (H, W) float32 scalar background-light map,
+                         mean(B_rgb) broadcast spatially.
     """
-    B     = estimate_background_light(image_np)
-    t_map = estimate_transmission_udcp(image_np, B)
-    b_map = np.full(t_map.shape, float(np.mean(B)), dtype=np.float32)
-    return t_map, b_map
+    image = _as_float_rgb(image_np)
+    depth_map, _ = estimate_depth_gdcp(image)
+    b_rgb = estimate_background_light_gdcp(image, depth_map=depth_map)
+    t_map = estimate_transmission_gdcp(image, b_rgb)
+    b_map = np.full(t_map.shape, float(np.mean(b_rgb)), dtype=np.float32)
+    return t_map.astype(np.float32), b_map
