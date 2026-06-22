@@ -120,9 +120,24 @@ def estimate_depth_gdcp(image_np: np.ndarray, win: int = 15) -> tuple[np.ndarray
     rough_depth = 1.0 - grad_map
 
     dep_vec = rough_depth.reshape(-1).astype(np.float64)
-    im_vec = image.reshape(-1, 3).astype(np.float64)
-    design = np.stack([np.ones_like(dep_vec), dep_vec], axis=1)
-    weights, _, _, _ = np.linalg.lstsq(design, im_vec, rcond=None)
+    im_vec  = image.reshape(-1, 3).astype(np.float64)
+
+    # Closed-form normal equations for X = [ones, d]  (2×2 system, O(n))
+    # weights = (XᵀX)⁻¹ Xᵀ Y  — avoids SVD used by lstsq
+    n    = float(len(dep_vec))
+    sd   = float(dep_vec.sum())
+    sd2  = float((dep_vec * dep_vec).sum())
+    det  = n * sd2 - sd * sd
+    if abs(det) < 1e-12:
+        # Degenerate (flat depth map): intercept = mean(Y), slope = 0
+        weights = np.zeros((2, 3), dtype=np.float64)
+        weights[0] = im_vec.mean(axis=0)
+    else:
+        s_y  = im_vec.sum(axis=0)          # (3,)
+        sd_y = dep_vec @ im_vec            # (3,)
+        weights = np.empty((2, 3), dtype=np.float64)
+        weights[0] = (sd2 * s_y  - sd  * sd_y) / det   # intercept
+        weights[1] = (n   * sd_y - sd  * s_y)  / det   # slope
 
     slopes = weights[1, :]
     ws = np.tanh(4.0 * np.abs(slopes))
@@ -208,7 +223,7 @@ def estimate_transmission_udcp(
 
 def compute_physics_maps(image_np: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Return ``(t_map, b_map)`` using Ucolor/GDCP extraction."""
-    image = _as_float_rgb(image_np)
+    image = _as_float_rgb(image_np)          # validate + normalise once
     depth_map, _ = estimate_depth_gdcp(image)
     b_rgb = estimate_background_light_gdcp(image, depth_map=depth_map)
     t_map = estimate_transmission_gdcp(image, b_rgb)
