@@ -80,7 +80,7 @@ def option():
     # Physics front-end
     # ------------------------------------------------------------------
     parser.add_argument('--prior_method', type=str, default='udcp',
-                        choices=['udcp', 'gdcp', 'multi_prior'],
+                        choices=['udcp', 'gdcp', 'gupdm', 'multi_prior'],
                         help='Transmission-map / background-light estimation method')
     parser.add_argument('--guided_filter_radius', type=int, default=40,
                         help='Radius for the guided image filter used to '

@@ -23,7 +23,7 @@ from data.scheduler import (
     CosineAnnealingRestartLR,
     CosineAnnealingRestartCyclicLR,
 )
-from net import compute_physics_maps
+from net import compute_physics_maps, compute_physics_maps_gdcp, compute_physics_maps_gupdm
 from net.registry import build_model, parse_model_variant
 from loss import CompositeLoss
 from measure_underwater import evaluate_loader
@@ -33,7 +33,27 @@ from measure_underwater import evaluate_loader
 # Physics pre-processing collate helper
 # ============================================================
 
-def _add_physics_channels(rgb_tensor: torch.Tensor, mode: str) -> torch.Tensor:
+def _resolve_physics_extractor(prior_method: str):
+    """Select the physics feature extractor requested by --prior_method."""
+    if prior_method == "udcp":
+        return compute_physics_maps
+    if prior_method == "gdcp":
+        return compute_physics_maps_gdcp
+    if prior_method == "gupdm":
+        return compute_physics_maps_gupdm
+    if prior_method == "multi_prior":
+        raise ValueError(
+            "--prior_method multi_prior is not wired to a single 4/5-channel "
+            "model input. Use udcp, gdcp, or gupdm."
+        )
+    raise ValueError(f"Unknown --prior_method: {prior_method}")
+
+
+def _add_physics_channels(
+    rgb_tensor: torch.Tensor,
+    mode: str,
+    physics_extractor=compute_physics_maps,
+) -> torch.Tensor:
     """
     Append physics-derived channels to an RGB tensor.
 
@@ -52,7 +72,7 @@ def _add_physics_channels(rgb_tensor: torch.Tensor, mode: str) -> torch.Tensor:
         return rgb_tensor
 
     img_np = rgb_tensor.permute(1, 2, 0).numpy().astype(np.float32)
-    t_map, b_map = compute_physics_maps(img_np)
+    t_map, b_map = physics_extractor(img_np)
 
     if mode == "t":
         t_t = torch.from_numpy(t_map).unsqueeze(0)   # (1, H, W)
@@ -70,7 +90,7 @@ def _add_physics_channels(rgb_tensor: torch.Tensor, mode: str) -> torch.Tensor:
     raise ValueError(f"Unknown physics mode: '{mode}'")
 
 
-def _collate_train(batch, physics_mode: str):
+def _collate_train(batch, physics_mode: str, physics_extractor=compute_physics_maps):
     """
     Custom collate that:
       - Drops the filename strings returned by the dataset.
@@ -81,15 +101,15 @@ def _collate_train(batch, physics_mode: str):
     inps = []
     gts  = []
     for inp, gt, *_ in batch:
-        inp = _add_physics_channels(inp, physics_mode)
+        inp = _add_physics_channels(inp, physics_mode, physics_extractor)
         inps.append(inp)
         gts.append(gt)
     return torch.stack(inps), torch.stack(gts)
 
 
-def _collate_val(batch, physics_mode: str):
+def _collate_val(batch, physics_mode: str, physics_extractor=compute_physics_maps):
     """Same as _collate_train but for validation paired datasets."""
-    return _collate_train(batch, physics_mode)
+    return _collate_train(batch, physics_mode, physics_extractor)
 
 
 # ============================================================
@@ -259,6 +279,7 @@ def main():
     # Determine input channels and physics mode from model name
     # ------------------------------------------------------------------
     _, in_channels, physics_mode = parse_model_variant(args.model)
+    physics_extractor = _resolve_physics_extractor(args.prior_method)
 
     # ------------------------------------------------------------------
     # Model
@@ -277,13 +298,14 @@ def main():
     else:
         print(f"GPUs      : 1  (single)")
     print(f"Model     : {args.model}  (in_channels={in_channels}, physics={physics_mode})")
+    print(f"Prior     : {args.prior_method}")
 
 
     # ------------------------------------------------------------------
     # Datasets & DataLoaders
     # ------------------------------------------------------------------
-    collate_fn_train = lambda b: _collate_train(b, physics_mode)
-    collate_fn_val   = lambda b: _collate_val(b, physics_mode)
+    collate_fn_train = lambda b: _collate_train(b, physics_mode, physics_extractor)
+    collate_fn_val   = lambda b: _collate_val(b, physics_mode, physics_extractor)
 
     # Training dataset
     if args.dataset == "euvp":
