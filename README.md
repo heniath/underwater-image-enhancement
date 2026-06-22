@@ -1,10 +1,21 @@
 # Physics-Guided Underwater Image Enhancement
 
-U-Net trained with physics-guided input channels (UDCP transmission map + background light) on the EUVP benchmark.
+PyTorch training code for underwater image enhancement with optional
+physics-guided input channels. The model variants support RGB-only input,
+RGB plus a transmission map, RGB plus a background-light map, or RGB plus both.
+
+Supported physics prior extractors:
+
+- `udcp`: original lightweight underwater dark-channel baseline.
+- `gdcp`: Ucolor/GDCP-style transmission and background-light extraction.
+- `gupdm`: GUPDM-style transmission-guided physical prior.
+
+See [PHYSICS_PRIORS.md](PHYSICS_PRIORS.md) for a detailed explanation of the
+three extraction methods.
 
 ---
 
-## Environment Setup (Conda)
+## Environment Setup
 
 ### 1. Create and activate the conda environment
 
@@ -13,7 +24,7 @@ conda create -n uwir python=3.10 -y
 conda activate uwir
 ```
 
-### 2. Install PyTorch (CUDA 12.1)
+### 2. Install PyTorch with CUDA 12.1
 
 ```bash
 conda install pytorch torchvision torchaudio pytorch-cuda=12.1 -c pytorch -c nvidia -y
@@ -25,115 +36,170 @@ conda install pytorch torchvision torchaudio pytorch-cuda=12.1 -c pytorch -c nvi
 pip install -r requirements.txt
 ```
 
-> **Note**: PyTorch is already installed via conda, so pip will skip it.
-> If pip tries to reinstall a CPU-only build, use
-> `pip install -r requirements.txt --no-deps torch torchvision torchaudio` instead.
+If PyTorch is already installed by conda, pip should skip it. If pip attempts
+to reinstall a CPU-only build, install the remaining packages manually or use
+your environment's preferred PyTorch install command.
 
 ### 4. Verify the installation
 
 ```bash
 python - <<'EOF'
 import torch, torchvision, kornia, cv2, skimage, thop
-print("torch     :", torch.__version__, "| CUDA:", torch.cuda.is_available())
+print("torch      :", torch.__version__, "| CUDA:", torch.cuda.is_available())
 print("torchvision:", torchvision.__version__)
-print("kornia    :", kornia.__version__)
-print("opencv    :", cv2.__version__)
-print("scikit-img:", skimage.__version__)
-print("thop      :", thop.__version__)
+print("kornia     :", kornia.__version__)
+print("opencv     :", cv2.__version__)
+print("scikit-img :", skimage.__version__)
+print("thop       :", thop.__version__)
 EOF
 ```
 
 ---
 
-## Quick-start (one-liner after first-time setup)
+## Quick Start
 
 ```bash
-conda activate uwir && python net_test.py
+conda activate uwir
+python net_test.py
 ```
 
 ---
 
 ## Dataset Setup
 
-Download datasets and place them under `./datasets/` with the following structure:
+Place datasets under `./datasets/` or pass custom paths through CLI arguments.
 
-```
+Expected layout:
+
+```text
 datasets/
   EUVP/
     Paired/
       underwater_imagenet/
-        trainA/          ← degraded inputs
-        trainB/          ← clean references
-        testA/
-        testB/
+        trainA/          <- degraded inputs
+        trainB/          <- clean references
       underwater_dark/
-        trainA/ trainB/ testA/ testB/
+        trainA/
+        trainB/
       underwater_scenes/
-        trainA/ trainB/ testA/ testB/
+        trainA/
+        trainB/
   UIEB/
-    raw-890/             ← degraded inputs
-    reference-890/       ← reference images
+    raw-890/             <- degraded inputs
+    reference-890/       <- reference images
   UFO120/
     train_val/
-      lrd/               ← low-res / degraded
-      hr/                ← high-quality reference
+      lrd/               <- low-quality inputs
+      hr/                <- high-quality references
     test/
       lrd/
       hr/
-  U45/                   ← 45 no-reference images (flat folder)
+  U45/                   <- no-reference images, flat folder
+```
+
+For Kaggle or other hosted environments, pass the mounted dataset path, for
+example:
+
+```bash
+python train.py \
+  --model unet_5ch \
+  --dataset euvp \
+  --data_train_euvp /kaggle/input/datasets/pamuduranasinghe/euvp-dataset/EUVP
 ```
 
 ---
 
 ## Training
 
-```bash
-conda activate uwir
+### Basic runs
 
-# Full 5-channel model (RGB + transmission map + background light)
+```bash
+# Full 5-channel model: RGB + t(x) + B
 python train.py --model unet_5ch --dataset euvp
 
 # RGB-only baseline
 python train.py --model unet_3ch --dataset euvp
 
-# Combined EUVP + UIEB training
-python train.py --model unet_5ch --dataset euvp+uieb
+# RGB + transmission map only
+python train.py --model unet_4ch_t --dataset euvp
 
-# Custom hyper-parameters
-python train.py \
-    --model unet_5ch \
-    --dataset euvp \
-    --batchSize 8 \
-    --nEpochs 200 \
-    --lr 1e-4 \
-    --cos_restart True \
-    --warmup_epochs 5 \
-    --early_stop_patience 20
+# RGB + background-light map only
+python train.py --model unet_4ch_b --dataset euvp
 ```
 
-Key arguments (see `data/options.py` for the full list):
+### Select a physics prior extractor
+
+```bash
+# Original UDCP baseline
+python train.py --model unet_5ch --dataset euvp --prior_method udcp
+
+# Ucolor/GDCP-style prior
+python train.py --model unet_5ch --dataset euvp --prior_method gdcp
+
+# GUPDM-style prior
+python train.py --model unet_5ch --dataset euvp --prior_method gupdm
+```
+
+### Example Kaggle command
+
+```bash
+python train.py \
+  --model unet_5ch \
+  --dataset euvp \
+  --data_train_euvp /kaggle/input/datasets/pamuduranasinghe/euvp-dataset/EUVP \
+  --batchSize 16 \
+  --nEpochs 50 \
+  --threads 2 \
+  --num_gpus 2 \
+  --prior_method gdcp \
+  --run_name unet5ch_gdcp_euvp
+```
+
+### Custom hyperparameters
+
+```bash
+python train.py \
+  --model unet_5ch \
+  --dataset euvp \
+  --prior_method udcp \
+  --batchSize 8 \
+  --nEpochs 200 \
+  --lr 1e-4 \
+  --cos_restart True \
+  --warmup_epochs 5 \
+  --early_stop_patience 20
+```
+
+Key arguments:
 
 | Argument | Default | Description |
-|---|---|---|
-| `--model` | `unet_5ch` | Model variant (`unet_3ch`, `unet_5ch`, …) |
-| `--dataset` | `euvp` | Training set (`euvp`, `uieb`, `ufo120`, `euvp+uieb`) |
-| `--batchSize` | `16` | Mini-batch size |
-| `--nEpochs` | `200` | Total epochs |
-| `--lr` | `1e-4` | Initial learning rate |
-| `--cos_restart` | `True` | Cosine annealing with restarts |
-| `--warmup_epochs` | `3` | Linear LR warm-up epochs |
-| `--early_stop_patience` | `20` | Early stopping patience (epochs) |
-| `--checkpoint_dir` | `./checkpoints/` | Where to save `.pth` files |
+|---|---:|---|
+| `--model` | `unet_5ch` | Model variant: `3ch`, `4ch_t`, `4ch_b`, or `5ch` across supported backbones. |
+| `--dataset` | `euvp` | Training set: `euvp`, `uieb`, `ufo120`, or `euvp+uieb`. |
+| `--prior_method` | `udcp` | Physics extractor: `udcp`, `gdcp`, or `gupdm`. |
+| `--batchSize` | `16` | Mini-batch size. |
+| `--nEpochs` | `200` | Total training epochs. |
+| `--lr` | `1e-4` | Initial learning rate. |
+| `--threads` | `4` | DataLoader workers. Physics extraction runs in the loading path. |
+| `--checkpoint_dir` | `./checkpoints/` | Directory for saved `.pth` checkpoints. |
+| `--run_name` | empty | Optional run prefix for checkpoint folder naming. |
 
-Checkpoints are saved to `./checkpoints/` and the training history JSON to `./results/`.
+Checkpoints are saved under `./checkpoints/`. Training history is saved beside
+the checkpoint files.
 
 ---
 
 ## Evaluation
 
 ```bash
-python eval.py
+python eval.py \
+  --checkpoint_dir ./checkpoints/ \
+  --data_train_euvp ./datasets/EUVP \
+  --prior_method udcp
 ```
+
+Use the same `--prior_method` that was used for the checkpoint you want to
+evaluate.
 
 ---
 
@@ -143,52 +209,115 @@ python eval.py
 python net_test.py
 ```
 
-Prints inference time, parameter count (M), and FLOPs (G) for a `256×256` input.
+Prints inference time, parameter count, and FLOPs for a `256x256` input.
 
 ---
 
 ## Ablation Variants
 
 | Variant | Input channels | Description |
-|---|---|---|
-| `unet_3ch` | 3 | RGB-only baseline |
-| `unet_4ch_t` | 4 | RGB + transmission map t(x) |
-| `unet_4ch_b` | 4 | RGB + background light B |
-| **`unet_5ch`** | **5** | **RGB + t(x) + B ← proposed** |
+|---|---:|---|
+| `*_3ch` | 3 | RGB-only baseline. |
+| `*_4ch_t` | 4 | RGB + transmission/prior map `t(x)`. |
+| `*_4ch_b` | 4 | RGB + scalar background-light map `B`. |
+| `*_5ch` | 5 | RGB + `t(x)` + `B`. |
+
+Supported backbones include:
+
+- `unet`
+- `resnet`
+- `mobilenet`
+- `mambavision`
+- `mambaunet`
+
+Examples:
+
+```bash
+python train.py --model resnet_5ch --dataset euvp --prior_method gdcp
+python train.py --model mobilenet_4ch_t --dataset euvp --prior_method gupdm
+python train.py --model mambavision_3ch --dataset euvp
+```
+
+---
+
+## Physics Prior Files
+
+```text
+net/physics.py        - UDCP baseline extractor
+net/physics_gdcp.py   - Ucolor/GDCP extractor
+net/physics_gupdm.py  - GUPDM-style extractor
+PHYSICS_PRIORS.md     - Detailed method explanation
+```
+
+The training code selects the extractor through `--prior_method` and keeps the
+same model input layout for all methods.
 
 ---
 
 ## Project Structure
 
-```
+```text
 underwater-image-enhancement/
-├── data/
-│   ├── UWIRdataset.py   — UIEB, EUVP, UFO-120, U45 dataset classes
-│   ├── data.py          — Dataset factory functions
-│   ├── eval_sets.py     — Padded / simple eval loaders
-│   ├── options.py       — All training arguments (argparse)
-│   ├── scheduler.py     — GradualWarmup, CosineRestartLR schedulers
-│   └── util.py          — is_image_file, load_img helpers
-├── net/
-│   ├── unet.py          — UNet5ch model (3- or 5-channel input)
-│   └── physics.py       — UDCP transmission map + background light
-├── loss/
-│   └── losses.py        — CompositeLoss (L1 + VGG Perceptual + SSIM)
-├── measure_underwater.py — PSNR, SSIM, CIEDE2000, UCIQE, UIQM metrics
-├── train.py             — Main training loop
-├── eval.py              — Test-set evaluation
-├── net_test.py          — Model profiling (time / params / FLOPs)
-├── requirements.txt     — pip dependencies
-└── README.md
+  data/
+    UWIRdataset.py       - UIEB, EUVP, UFO-120, U45 dataset classes
+    data.py              - Dataset factory functions
+    eval_sets.py         - Evaluation dataset loaders
+    options.py           - CLI arguments
+    scheduler.py         - Warmup and cosine scheduler helpers
+    util.py              - Image loading helpers
+  loss/
+    losses.py            - Composite loss
+  net/
+    physics.py           - UDCP baseline
+    physics_gdcp.py      - Ucolor/GDCP prior
+    physics_gupdm.py     - GUPDM-style prior
+    registry.py          - Model factory and variant parsing
+    unet.py              - U-Net model
+    resnet_unet.py       - ResNet U-Net model
+    mobilenet_unet.py    - MobileNet U-Net model
+    mambavision_unet.py  - MambaVision U-Net model
+    mamba_unet.py        - Mamba U-Net model
+  measure_underwater.py  - PSNR, SSIM, CIEDE2000, UCIQE, UIQM metrics
+  train.py               - Main training loop
+  eval.py                - Checkpoint evaluation
+  net_test.py            - Model profiling
+  PHYSICS_PRIORS.md      - Physics prior documentation
+  requirements.txt
+  README.md
 ```
+
+---
+
+## Runtime Notes
+
+Physics maps are currently computed on the fly in the DataLoader collate path.
+`gdcp` is significantly slower than `udcp` and `gupdm` because it performs
+full-image depth estimation, morphology, least-squares fitting, and filtering.
+
+For quick debugging, use:
+
+```bash
+--prior_method udcp
+```
+
+For Ucolor-style experiments, use:
+
+```bash
+--prior_method gdcp
+```
+
+For long training runs with heavy priors, precomputing or caching physics maps
+is recommended.
 
 ---
 
 ## Results
 
-| Variant | Val PSNR | Test PSNR | Val SSIM | Test SSIM |
-|---|---|---|---|---|
-| `unet_3ch` (RGB only) | — | — | — | — |
-| `unet_5ch` (proposed) | — | — | — | — |
+| Variant | Prior | Val PSNR | Test PSNR | Val SSIM | Test SSIM |
+|---|---|---:|---:|---:|---:|
+| `unet_3ch` | none | - | - | - | - |
+| `unet_5ch` | `udcp` | - | - | - | - |
+| `unet_5ch` | `gdcp` | - | - | - | - |
+| `unet_5ch` | `gupdm` | - | - | - | - |
 
-*Fill in after training.*
+Fill in after training.
