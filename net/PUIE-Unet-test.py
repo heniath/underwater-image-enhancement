@@ -17,14 +17,14 @@ Inference / evaluation for a trained **PUIE-UNet** checkpoint.
 Examples
 --------
     # Paired UIEB test set → save outputs + metrics
-    python PUIE-Unet-test.py --model unet_5ch \
+    python net/PUIE-Unet-test.py --model unet_5ch \
         --resume ./checkpoints/puie_unet_uieb_XXXX/best_model.pth \
         --data_val_uieb ./datasets/UIEB/test/input \
         --data_valgt_uieb ./datasets/UIEB/test/reference \
         --num_samples 8 --val_folder ./results/puie_unet_uieb
 
     # No-reference folder (U45) → save outputs only
-    python PUIE-Unet-test.py --model unet_3ch \
+    python net/PUIE-Unet-test.py --model unet_3ch \
         --resume ./checkpoints/run/best_model.pth \
         --data_val_u45 ./datasets/U45 --num_samples 8 \
         --val_folder ./results/puie_u45
@@ -39,6 +39,13 @@ import torch.nn as nn
 import torch.utils.data as data
 import torchvision.transforms as T
 from PIL import Image
+
+# Allow running this file directly (`python net/PUIE-Unet-test.py`): the
+# absolute `net.*` / `data.*` imports below need the repo root on sys.path,
+# but Python only adds this file's own directory (net/) when run as a script.
+if __package__ in (None, ""):
+    import sys
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from data.options import option
 from data.util import is_image_file

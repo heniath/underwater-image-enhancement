@@ -34,6 +34,7 @@ import torch.nn as nn
 from net.unet import UNet5ch
 from net.resnet_unet import ResNetUNet
 from net.mobilenet_unet import MobileNetUNet
+from net.efficientnet_unet import EfficientNetUNet
 from net.mambavision_unet import MambaVisionUNet
 from net.mamba_unet import MambaUNet
 
@@ -42,7 +43,7 @@ from net.mamba_unet import MambaUNet
 # Supported names
 # ---------------------------------------------------------------------------
 
-_BACKBONES = ("unet", "resnet", "mobilenet", "mambavision", "mambaunet")
+_BACKBONES = ("unet", "resnet", "mobilenet", "efficientnet", "mambavision", "mambaunet")
 
 _VARIANTS = {
     "3ch":   (3, "none"),
@@ -128,6 +129,9 @@ def build_model(name: str, pretrained_backbone: bool = True) -> nn.Module:
 
     if backbone == "mobilenet":
         return MobileNetUNet(in_channels=in_channels, pretrained=pretrained_backbone)
+
+    if backbone == "efficientnet":
+        return EfficientNetUNet(in_channels=in_channels, pretrained=pretrained_backbone)
 
     if backbone == "mambavision":
         return MambaVisionUNet(in_channels=in_channels, pretrained=pretrained_backbone)

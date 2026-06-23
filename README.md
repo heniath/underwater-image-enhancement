@@ -4,8 +4,8 @@ U-Net trained with physics-guided input channels (UDCP transmission map + backgr
 
 Two model families are provided:
 
-- **Deterministic U-Net** (`train.py`) — the standard 4-level U-Net (`unet_*` and the ResNet / MobileNet / Mamba backbones).
-- **PUIE-UNet** (`PUIE-Unet.py`) — a **probabilistic** variant that grafts PUIE-Net's conditional-VAE mechanism (prior/posterior latent encoders + KL divergence, trained with an ELBO) onto the same deeper U-Net backbone. At inference it can run deterministically (MC) or average several prior samples (MP) for an ensembling boost.
+- **Deterministic U-Net** (`train.py`) — the standard 4-level U-Net (`unet_*` and the ResNet / MobileNet / EfficientNet / Mamba backbones).
+- **PUIE-UNet** (`net/PUIE-Unet.py`) — a **probabilistic** variant that grafts PUIE-Net's conditional-VAE mechanism (prior/posterior latent encoders + KL divergence, trained with an ELBO) onto the same deeper U-Net backbone. At inference it can run deterministically (MC) or average several prior samples (MP) for an ensembling boost.
 
 ---
 
@@ -136,7 +136,7 @@ Checkpoints are saved to `./checkpoints/` and the training history JSON to `./re
 
 ## PUIE-UNet (Probabilistic variant)
 
-`PUIE-Unet.py` combines two ideas:
+`net/PUIE-Unet.py` combines two ideas:
 
 - **From PUIE-Net** — a conditional VAE. A **prior** encoder sees only the (physics-augmented) input; a **posterior** encoder also sees the ground truth. Each branch produces two latent codes — a *mean* latent `u` and a *std* latent `s` — injected back into the decoder via FiLM modulation `InstanceNorm(feat) · |s| + u`. Training optimises an **ELBO** = reconstruction + `β · KL(posterior ‖ prior)`. At test time only the prior branch runs.
 - **From this repo** — the deeper 4-level U-Net backbone, the physics front-end (UDCP `t(x)` + background light `B`), `CompositeLoss` (L1 + VGG + SSIM) as the reconstruction term, plus the dataset loaders, scheduler, early-stopping, checkpointing and metric suite (all reused, not re-written).
@@ -149,7 +149,7 @@ Checkpoints are saved to `./checkpoints/` and the training history JSON to `./re
 conda activate uwir
 
 # 5-channel PUIE-UNet on UIEB, with KL annealing
-python PUIE-Unet.py \
+python net/PUIE-Unet.py \
     --dataset uieb \
     --data_train_uieb ./datasets/UIEB \
     --model unet_5ch \
@@ -160,7 +160,7 @@ python PUIE-Unet.py \
     --run_name puie_unet_uieb
 
 # RGB-only PUIE-UNet on EUVP
-python PUIE-Unet.py --dataset euvp --data_train_euvp ./datasets/EUVP --model unet_3ch
+python net/PUIE-Unet.py --dataset euvp --data_train_euvp ./datasets/EUVP --model unet_3ch
 ```
 
 PUIE-specific arguments (in addition to all of `train.py`'s; see `data/options.py`):
@@ -176,11 +176,11 @@ The training log adds two columns, **Recon** and **KL**, so you can watch the EL
 
 ### Inference / Evaluation
 
-`PUIE-Unet-test.py` loads a checkpoint, runs the prior branch, saves enhanced images, and (when ground truth is available) reports the full metric suite.
+`net/PUIE-Unet-test.py` loads a checkpoint, runs the prior branch, saves enhanced images, and (when ground truth is available) reports the full metric suite.
 
 ```bash
 # Paired UIEB test set → save outputs + PSNR/SSIM/CIEDE2000/UCIQE/UIQM
-python PUIE-Unet-test.py \
+python net/PUIE-Unet-test.py \
     --model unet_5ch \
     --resume ./checkpoints/puie_unet_uieb_XXXXXXXX_XXXXXX/best_model.pth \
     --data_val_uieb   ./datasets/UIEB/test/input \
@@ -189,7 +189,7 @@ python PUIE-Unet-test.py \
     --val_folder ./results/puie_unet_uieb
 
 # No-reference folder (U45) → save outputs only
-python PUIE-Unet-test.py \
+python net/PUIE-Unet-test.py \
     --model unet_3ch \
     --resume ./checkpoints/run/best_model.pth \
     --data_val_u45 ./datasets/U45 \
@@ -224,12 +224,21 @@ Prints inference time, parameter count (M), and FLOPs (G) for a `256×256` input
 
 ## Ablation Variants
 
+Each variant is named `<backbone>_<channels>`. Available **backbones**: `unet`,
+`resnet` (ResNet-50), `mobilenet` (MobileNetV3-Large), `efficientnet`
+(EfficientNet-B0), `mambavision`, `mambaunet`. The **channel** suffix selects the
+physics front-end:
+
 | Variant | Input channels | Description |
 |---|---|---|
 | `unet_3ch` | 3 | RGB-only baseline |
 | `unet_4ch_t` | 4 | RGB + transmission map t(x) |
 | `unet_4ch_b` | 4 | RGB + background light B |
 | **`unet_5ch`** | **5** | **RGB + t(x) + B ← proposed** |
+
+> Swap the backbone freely, e.g. `--model efficientnet_5ch` or
+> `--model resnet_4ch_t`. Run `python train.py --help` for the full list of
+> `--model` choices.
 
 ---
 
@@ -245,14 +254,24 @@ underwater-image-enhancement/
 │   ├── scheduler.py     — GradualWarmup, CosineRestartLR schedulers
 │   └── util.py          — is_image_file, load_img helpers
 ├── net/
-│   ├── unet.py          — UNet5ch model (3- or 5-channel input)
-│   └── physics.py       — UDCP transmission map + background light
+│   ├── __init__.py      — Package init + public API
+│   ├── registry.py      — Model factory (build_model / parse_model_variant)
+│   ├── blocks.py        — Shared DoubleConv + DecoderBlock building blocks
+│   ├── unet.py          — UNet5ch (vanilla 4-level U-Net)
+│   ├── resnet_unet.py   — ResNet-50 encoder + U-Net decoder
+│   ├── mobilenet_unet.py  — MobileNetV3-Large encoder + U-Net decoder
+│   ├── efficientnet_unet.py  — EfficientNet-B0 encoder + U-Net decoder
+│   ├── mambavision_unet.py  — MambaVision-T encoder + U-Net decoder
+│   ├── mamba_unet.py    — Full Mamba U-Net (VSS blocks)
+│   ├── physics.py       — UDCP transmission map + background light
+│   ├── physics_gdcp.py  — GDCP transmission map variant
+│   ├── physics_gupdm.py — GUPDM physics front-end
+│   ├── PUIE-Unet.py     — PUIE-UNet model + probabilistic (ELBO) training loop
+│   └── PUIE-Unet-test.py  — PUIE-UNet inference / evaluation (MC & MP modes)
 ├── loss/
 │   └── losses.py        — CompositeLoss (L1 + VGG Perceptual + SSIM)
 ├── measure_underwater.py — PSNR, SSIM, CIEDE2000, UCIQE, UIQM metrics
 ├── train.py             — Main training loop (deterministic U-Net)
-├── PUIE-Unet.py         — PUIE-UNet model + probabilistic (ELBO) training loop
-├── PUIE-Unet-test.py    — PUIE-UNet inference / evaluation (MC & MP modes)
 ├── eval.py              — Test-set evaluation
 ├── net_test.py          — Model profiling (time / params / FLOPs)
 ├── requirements.txt     — pip dependencies

@@ -99,6 +99,8 @@ def option():
                             'resnet_3ch', 'resnet_4ch_t', 'resnet_4ch_b', 'resnet_5ch',
                             # MobileNetV3-Large encoder
                             'mobilenet_3ch', 'mobilenet_4ch_t', 'mobilenet_4ch_b', 'mobilenet_5ch',
+                            # EfficientNet-B0 encoder
+                            'efficientnet_3ch', 'efficientnet_4ch_t', 'efficientnet_4ch_b', 'efficientnet_5ch',
                             # MambaVision-T encoder (Mamba + Transformer hybrid, NVIDIA 2024)
                             'mambavision_3ch', 'mambavision_4ch_t', 'mambavision_4ch_b', 'mambavision_5ch',
                             # Native Mamba U-Net (VSS blocks at every encoder+decoder stage)

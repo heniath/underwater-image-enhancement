@@ -1,6 +1,7 @@
 from .unet import UNet5ch
 from .resnet_unet import ResNetUNet
 from .mobilenet_unet import MobileNetUNet
+from .efficientnet_unet import EfficientNetUNet
 from .mambavision_unet import MambaVisionUNet
 from .mamba_unet import MambaUNet
 from .physics import compute_physics_maps, estimate_background_light, estimate_transmission_udcp
@@ -12,6 +13,7 @@ __all__ = [
     "UNet5ch",
     "ResNetUNet",
     "MobileNetUNet",
+    "EfficientNetUNet",
     "MambaVisionUNet",
     "MambaUNet",
     "compute_physics_maps",

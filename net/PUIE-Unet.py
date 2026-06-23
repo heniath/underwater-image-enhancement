@@ -26,10 +26,10 @@ Idea (combining the two projects)
 
 Run from inside the ``underwater-image-enhancement`` directory, e.g.::
 
-    python PUIE-Unet.py --dataset uieb  --data_train_uieb ./datasets/UIEB \
+    python net/PUIE-Unet.py --dataset uieb  --data_train_uieb ./datasets/UIEB \
         --model unet_5ch --batchSize 8 --nEpochs 200 --run_name puie_unet_uieb
 
-    python PUIE-Unet.py --dataset euvp  --data_train_euvp ./datasets/EUVP \
+    python net/PUIE-Unet.py --dataset euvp  --data_train_euvp ./datasets/EUVP \
         --model unet_3ch --kl_weight 1.0 --kl_anneal_epochs 20
 
 Note: the *backbone* part of ``--model`` is ignored here (the backbone is
@@ -47,6 +47,13 @@ import torch
 import torch.nn as nn
 import torch.utils.data as data
 from torch.distributions import Normal, Independent, kl_divergence
+
+# Allow running this file directly (`python net/PUIE-Unet.py`): the absolute
+# `net.*` / `data.*` imports below need the repo root on sys.path, but Python
+# only adds this file's own directory (net/) when run as a script.
+if __package__ in (None, ""):
+    import sys
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # ---- Reuse this repo's building blocks & plumbing -------------------------
 from net.unet import DoubleConv, Down, Up
