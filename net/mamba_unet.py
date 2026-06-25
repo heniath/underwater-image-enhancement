@@ -13,8 +13,10 @@ Design choices (all transparent — see implementation_plan.md for rationale):
   enc_depths    (2, 2, 6, 2)         — heavy bottleneck, light early stages
   dec_depths    (2, 2, 2, 2)         — lighter decoder (refinement, not global modelling)
   patch_embed   stride-4             — first VSSBlocks at H/4 → max L = 4 096 at 256 px
-  scan          chunked (chunk=64)   — 64 Python-loop iters vs. 4 096 for naive scan;
-                                       each chunk is fully vectorised on CUDA
+  scan          chunked (chunk=64)   — sequential recurrence inside each 64-token
+                                       chunk; division-free → stable fp32 backward
+                                       (Windows/CPU fallback). CUDA path uses the
+                                       fused mamba-ssm kernel instead.
   4 directions  raster, flip-H, flip-W, transpose — VMamba-style SS2D
   d_state = 16, dt_rank = ceil(dim/16) — standard Mamba defaults
   in_channels ∈ {3, 4, 5}           — physics ablation variants supported
@@ -69,7 +71,7 @@ def _ssm_scan_chunked(
     chunk_size: int = 64,
 ) -> torch.Tensor:
     """
-    Chunked prefix-product SSM scan.
+    Chunked SSM scan with a numerically stable *sequential* inner recurrence.
 
     Memory-efficient design: deltaA and deltaB_u are computed *inside*
     each chunk loop iteration, so peak memory is O(chunk_size) not O(L).
@@ -77,6 +79,20 @@ def _ssm_scan_chunked(
     At enc1 (B=16, d_inner=192, L=4096, d_state=16):
       Naïve pre-compute: (16, 192, 4096, 16) × 2 ≈ 1.6 GB just for those tensors.
       Chunked (chunk=64): (16, 192, 64, 16) × 2 ≈ 25 MB — 64× less.
+
+    Numerical stability
+    -------------------
+    The previous "parallel prefix" trick computed the recurrence as
+    ``A_pfx · cumsum(dBu / A_pfx)``.  Dividing by ``cumprod(dA)`` is the
+    problem: ``dA ∈ (0, 1]`` so the cumulative product underflows toward 0
+    after a few dozen steps, and the *backward* pass of that division has a
+    ``1 / A_pfx²`` term that explodes to inf → NaN (visible only on the
+    Windows / CPU fallback path, where mamba-ssm's fused kernel is absent).
+
+    Here we instead unroll the true recurrence
+        ``x[t] = dA[t] · x[t-1] + dBu[t]``
+    step-by-step inside each chunk.  No division, so both forward and
+    backward stay bounded.  Slower than the prefix trick but correct.
 
     Returns: y  (B, d_inner, L)
     """
@@ -109,17 +125,15 @@ def _ssm_scan_chunked(
         dA  = torch.exp(torch.einsum("bdl,dn->bdln", delta_c, A))
         dBu = torch.einsum("bdl,bnl,bdl->bdln", delta_c, B_c, u_c)
 
-        # Parallel prefix product within the chunk
-        A_pfx = torch.cumprod(dA, dim=2)            # (B, d_in, T, n)
-
-        # Vectorised recurrence (zero initial state) + carried-over state.
-        # Clamp the quotient to ±1e15 so cumsum never overflows to inf:
-        # if A_pfx underflows to 0 in fp32 (possible after 40+ fast-decay steps)
-        # then 0 × inf = NaN; with the clamp, 0 × finite = 0 (correct: state gone).
-        A_pfx_safe  = A_pfx.clamp(min=1e-30)
-        safe_ratio  = (dBu / A_pfx_safe).clamp(min=-1e15, max=1e15)
-        x_from_zero = A_pfx * torch.cumsum(safe_ratio, dim=2)
-        x_chunk     = x_from_zero + A_pfx * x_state.unsqueeze(2)
+        # Sequential recurrence within the chunk (no division → stable backward).
+        # x[t] = dA[t] · x[t-1] + dBu[t]    with x[-1] = carried-over state.
+        T = end - start
+        x = x_state                                # (B, d_in, n)
+        x_steps = []
+        for t in range(T):
+            x = dA[:, :, t] * x + dBu[:, :, t]     # (B, d_in, n)
+            x_steps.append(x)
+        x_chunk = torch.stack(x_steps, dim=2)      # (B, d_in, T, n)
 
         # Update carry — detach to truncate BPTT at chunk boundaries.
         # Gradients still flow within each chunk (64 tokens). This is the

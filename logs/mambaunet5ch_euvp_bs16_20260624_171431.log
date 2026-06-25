@@ -1,0 +1,12 @@
+Run ID    : mambaunet5ch_euvp_bs16_20260624_171431
+Ckpt dir  : ./checkpoints/mambaunet5ch_euvp_bs16_20260624_171431
+Log file  : D:\underwater-image-enhancement\logs\mambaunet5ch_euvp_bs16_20260624_171431.log
+Command   : train.py --dataset euvp --data_train_euvp ./datasets/EUVP --model mambaunet_5ch --batchSize 12 --threads 0 --nEpochs 50 --run_name mambaunet5ch_euvp_bs16
+Timestamp : 2026-06-24 17:14:31
+-----------------------------------------------------------------
+
+=================================================================
+  Training: mambaunet_5ch   epochs=50   batch=12
+=================================================================
+ Epoch    TrainL      ValL     PSNR     SSIM         LR    Time
+-----------------------------------------------------------------

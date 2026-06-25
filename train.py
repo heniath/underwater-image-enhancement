@@ -197,6 +197,8 @@ def train_epoch(model, loader, optimizer, criterion, device):
     model.train()
     tot_loss = 0.0
     comps    = {"l1": 0.0, "perceptual": 0.0, "ssim_loss": 0.0}
+    n_good   = 0   # batches that produced a finite loss
+    n_skip   = 0   # batches skipped because loss/grad was non-finite
 
     # BỎ TQDM, DÙNG ENUMERATE THÔNG THƯỜNG
     for batch_idx, (inp, gt) in enumerate(loader):
@@ -204,19 +206,48 @@ def train_epoch(model, loader, optimizer, criterion, device):
         optimizer.zero_grad(set_to_none=True)
         pred         = model(inp)
         loss, parts  = criterion(pred, gt)
+
+        # Guard: a single non-finite loss would, after backward + grad-clip,
+        # poison every weight with NaN (clip scales all grads by nan) and the
+        # run never recovers. Skip the batch instead of stepping the optimizer.
+        if not torch.isfinite(loss):
+            n_skip += 1
+            if n_skip <= 5 or n_skip % 50 == 0:
+                print(f"   [Batch {batch_idx + 1}/{len(loader)}] "
+                      f"non-finite loss ({loss.item()}) — batch skipped "
+                      f"(total skipped: {n_skip})")
+            continue
+
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+
+        # Skip the step if any gradient went non-finite; otherwise clip_grad_norm_
+        # computes total_norm=nan and scales ALL grads to nan.
+        grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+        if not torch.isfinite(grad_norm):
+            n_skip += 1
+            if n_skip <= 5 or n_skip % 50 == 0:
+                print(f"   [Batch {batch_idx + 1}/{len(loader)}] "
+                      f"non-finite grad norm — step skipped "
+                      f"(total skipped: {n_skip})")
+            optimizer.zero_grad(set_to_none=True)
+            continue
+
         optimizer.step()
 
         tot_loss += loss.item()
         for k in comps:
             comps[k] += parts.get(k, 0.0)
+        n_good += 1
 
         # Chỉ in log ra màn hình mỗi 50 batch để tránh tràn I/O
         if (batch_idx + 1) % 50 == 0:
             print(f"   [Batch {batch_idx + 1}/{len(loader)}] Loss: {loss.item():.4f}")
 
-    n = len(loader)
+    if n_skip:
+        print(f"   [WARN] {n_skip}/{len(loader)} batches skipped (non-finite loss/grad)")
+
+    # Average only over the batches that actually contributed.
+    n = max(1, n_good)
     return tot_loss / n, {k: v / n for k, v in comps.items()}
 
 @torch.no_grad()

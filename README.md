@@ -4,7 +4,7 @@ U-Net trained with physics-guided input channels (UDCP transmission map + backgr
 
 Two model families are provided:
 
-- **Deterministic U-Net** (`train.py`) — the standard 4-level U-Net (`unet_*` and the ResNet / MobileNet / EfficientNet / Mamba backbones).
+- **Deterministic U-Net** (`train.py`) — the standard 4-level U-Net (`unet_*` and the ResNet / MobileNet / EfficientNet-B0 / EfficientNet-B1 / Mamba backbones).
 - **PUIE-UNet** (`net/PUIE-Unet.py`) — a **probabilistic** variant that grafts PUIE-Net's conditional-VAE mechanism (prior/posterior latent encoders + KL divergence, trained with an ELBO) onto the same deeper U-Net backbone. At inference it can run deterministically (MC) or average several prior samples (MP) for an ensembling boost.
 
 ---
@@ -225,8 +225,9 @@ Prints inference time, parameter count (M), and FLOPs (G) for a `256×256` input
 ## Ablation Variants
 
 Each variant is named `<backbone>_<channels>`. Available **backbones**: `unet`,
-`resnet` (ResNet-50), `mobilenet` (MobileNetV3-Large), `efficientnet`
-(EfficientNet-B0), `mambavision`, `mambaunet`. The **channel** suffix selects the
+`resnet` (ResNet-50), `mobilenet` (MobileNetV3-Large), `efficientnetb0`
+(EfficientNet-B0), `efficientnetb1` (EfficientNet-B1), `mambavision`,
+`mambaunet`. The **channel** suffix selects the
 physics front-end:
 
 | Variant | Input channels | Description |
@@ -236,9 +237,9 @@ physics front-end:
 | `unet_4ch_b` | 4 | RGB + background light B |
 | **`unet_5ch`** | **5** | **RGB + t(x) + B ← proposed** |
 
-> Swap the backbone freely, e.g. `--model efficientnet_5ch` or
-> `--model resnet_4ch_t`. Run `python train.py --help` for the full list of
-> `--model` choices.
+> Swap the backbone freely, e.g. `--model efficientnetb0_5ch`,
+> `--model efficientnetb1_5ch` or `--model resnet_4ch_t`. Run
+> `python train.py --help` for the full list of `--model` choices.
 
 ---
 
@@ -260,7 +261,8 @@ underwater-image-enhancement/
 │   ├── unet.py          — UNet5ch (vanilla 4-level U-Net)
 │   ├── resnet_unet.py   — ResNet-50 encoder + U-Net decoder
 │   ├── mobilenet_unet.py  — MobileNetV3-Large encoder + U-Net decoder
-│   ├── efficientnet_unet.py  — EfficientNet-B0 encoder + U-Net decoder
+│   ├── efficientnetb0_unet.py  — EfficientNet-B0 encoder + U-Net decoder
+│   ├── efficientnetb1_unet.py  — EfficientNet-B1 encoder + U-Net decoder
 │   ├── mambavision_unet.py  — MambaVision-T encoder + U-Net decoder
 │   ├── mamba_unet.py    — Full Mamba U-Net (VSS blocks)
 │   ├── physics.py       — UDCP transmission map + background light

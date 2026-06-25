@@ -1,0 +1,46 @@
+Run ID    : mambaunet5ch_euvp_bs8_20260624_171831
+Ckpt dir  : ./checkpoints/mambaunet5ch_euvp_bs8_20260624_171831
+Log file  : D:\underwater-image-enhancement\logs\mambaunet5ch_euvp_bs8_20260624_171831.log
+Command   : train.py --dataset euvp --data_train_euvp ./datasets/EUVP --model mambaunet_5ch --batchSize 8 --threads 0 --nEpochs 50 --run_name mambaunet5ch_euvp_bs8
+Timestamp : 2026-06-24 17:18:31
+-----------------------------------------------------------------
+
+=================================================================
+  Training: mambaunet_5ch   epochs=50   batch=8
+=================================================================
+ Epoch    TrainL      ValL     PSNR     SSIM         LR    Time
+-----------------------------------------------------------------
+   [Batch 50/1286] Loss: nan
+   [Batch 100/1286] Loss: nan
+   [Batch 150/1286] Loss: nan
+   [Batch 200/1286] Loss: nan
+   [Batch 250/1286] Loss: nan
+   [Batch 300/1286] Loss: nan
+   [Batch 350/1286] Loss: nan
+   [Batch 400/1286] Loss: nan
+   [Batch 450/1286] Loss: nan
+   [Batch 500/1286] Loss: nan
+   [Batch 550/1286] Loss: nan
+   [Batch 600/1286] Loss: nan
+   [Batch 650/1286] Loss: nan
+   [Batch 700/1286] Loss: nan
+   [Batch 750/1286] Loss: nan
+   [Batch 800/1286] Loss: nan
+   [Batch 850/1286] Loss: nan
+   [Batch 900/1286] Loss: nan
+   [Batch 950/1286] Loss: nan
+   [Batch 1000/1286] Loss: nan
+   [Batch 1050/1286] Loss: nan
+   [Batch 1100/1286] Loss: nan
+   [Batch 1150/1286] Loss: nan
+   [Batch 1200/1286] Loss: nan
+   [Batch 1250/1286] Loss: nan
+     1       nan       nan      nan      nan   1.00e-04  4849.6s
+   [Batch 50/1286] Loss: nan
+   [Batch 100/1286] Loss: nan
+   [Batch 150/1286] Loss: nan
+   [Batch 200/1286] Loss: nan
+   [Batch 250/1286] Loss: nan
+   [Batch 300/1286] Loss: nan
+   [Batch 350/1286] Loss: nan
+   [Batch 400/1286] Loss: nan

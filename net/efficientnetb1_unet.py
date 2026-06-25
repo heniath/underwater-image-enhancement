@@ -1,11 +1,16 @@
 """
-efficientnet_unet.py
---------------------
-EfficientNet-B0 encoder + U-Net decoder for underwater image restoration.
+efficientnetb1_unet.py
+----------------------
+EfficientNet-B1 encoder + U-Net decoder for underwater image restoration.
+
+EfficientNet-B1 shares EfficientNet-B0's width multiplier (1.0); only the depth
+multiplier differs (more MBConv sub-blocks per stage). The top-level feature
+list still has 9 entries with identical per-stage channel widths, so the same
+stage slicing and decoder configuration as ``EfficientNetB0UNet`` apply.
 
 Architecture
 ------------
-EfficientNet-B0 feature stages (stride-based skip points):
+EfficientNet-B1 feature stages (stride-based skip points):
 
   stage0   features[0:2]    16 ch,  H/2
   stage1   features[2:3]    24 ch,  H/4
@@ -34,29 +39,29 @@ The first Conv2d inside features[0] is re-initialised for in_channels ≠ 3.
 import torch
 import torch.nn as nn
 
-from torchvision.models import efficientnet_b0, EfficientNet_B0_Weights
+from torchvision.models import efficientnet_b1, EfficientNet_B1_Weights
 
 try:
     from net.blocks import DecoderBlock
-except ModuleNotFoundError:                       # run directly: `python net/efficientnet_unet.py`
+except ModuleNotFoundError:                       # run directly: `python net/efficientnetb1_unet.py`
     import os, sys
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     from net.blocks import DecoderBlock
 
 
-class EfficientNetUNet(nn.Module):
+class EfficientNetB1UNet(nn.Module):
     """
-    EfficientNet-B0 encoder + lightweight U-Net decoder.
+    EfficientNet-B1 encoder + lightweight U-Net decoder.
 
     Args:
         in_channels  (int):  Input channels – 3, 4, or 5.
         out_channels (int):  Output channels. Default: 3.
-        pretrained   (bool): Load ImageNet-pretrained EfficientNet-B0 weights.
+        pretrained   (bool): Load ImageNet-pretrained EfficientNet-B1 weights.
                              Default: True.
 
     Example::
 
-        model = EfficientNetUNet(in_channels=5)
+        model = EfficientNetB1UNet(in_channels=5)
         x = torch.randn(2, 5, 256, 256)
         y = model(x)   # (2, 3, 256, 256)
     """
@@ -69,8 +74,8 @@ class EfficientNetUNet(nn.Module):
     ):
         super().__init__()
 
-        weights  = EfficientNet_B0_Weights.IMAGENET1K_V1 if pretrained else None
-        backbone = efficientnet_b0(weights=weights)
+        weights  = EfficientNet_B1_Weights.IMAGENET1K_V1 if pretrained else None
+        backbone = efficientnet_b1(weights=weights)
         features = list(backbone.features)
 
         # ------------------------------------------------------------------
@@ -141,16 +146,16 @@ class EfficientNetUNet(nn.Module):
 
 
 # ---------------------------------------------------------------------------
-# Smoke-test: `python net/efficientnet_unet.py`
+# Smoke-test: `python net/efficientnetb1_unet.py`
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("=" * 55)
-    print(f"  EfficientNetUNet smoke-test  –  device: {device}")
+    print(f"  EfficientNetB1UNet smoke-test  –  device: {device}")
     print("=" * 55)
 
     for in_channels in (3, 4, 5):
-        model = EfficientNetUNet(in_channels=in_channels, pretrained=False).to(device)
+        model = EfficientNetB1UNet(in_channels=in_channels, pretrained=False).to(device)
         model.eval()
 
         x = torch.randn(2, in_channels, 256, 256, device=device)
