@@ -134,9 +134,7 @@ def _add_physics_channels(
     raise ValueError(f"Unknown physics mode: '{mode}'")
 
 
-def _collate_train(
-    batch, physics_mode: str, physics_extractor=None, fusion_extractor=None
-):
+def _collate_train(batch, physics_mode: str, physics_extractor=None, fusion_extractor=None):
     """
     Custom collate that:
       - Drops the filename strings returned by the dataset.
@@ -147,9 +145,7 @@ def _collate_train(
     inps = []
     gts = []
     for inp, gt, *_ in batch:
-        inp = _add_physics_channels(
-            inp, physics_mode, physics_extractor, fusion_extractor
-        )
+        inp = _add_physics_channels(inp, physics_mode, physics_extractor, fusion_extractor)
         inps.append(inp)
         gts.append(gt)
     return torch.stack(inps), torch.stack(gts)
@@ -282,6 +278,7 @@ def train_epoch(
     model.train()
     tot_loss = 0.0
     comps = {"l1": 0.0, "perceptual": 0.0, "ssim_loss": 0.0}
+    consecutive_amp_overflows = 0
 
     # BỎ TQDM, DÙNG ENUMERATE THÔNG THƯỜNG
     for batch_idx, (inp, gt) in enumerate(loader):
@@ -305,16 +302,47 @@ def train_epoch(
         if should_step:
             if scaler is not None:
                 scaler.unscale_(optimizer)
-            grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            if not torch.isfinite(grad_norm):
-                raise FloatingPointError(
-                    f"Non-finite gradient norm at batch {batch_idx + 1}: {grad_norm.item()}"
+            try:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0, error_if_nonfinite=True)
+            except RuntimeError as exc:
+                if not amp_enabled:
+                    raise FloatingPointError(
+                        f"Non-finite gradient norm at batch {batch_idx + 1}"
+                    ) from exc
+
+                # Overflow is expected occasionally with dynamic loss
+                # scaling. Skip this optimizer step and reduce the scale;
+                # raising immediately prevents GradScaler from doing its job.
+                consecutive_amp_overflows += 1
+                old_scale = scaler.get_scale()
+                bad_parameters = (
+                    [
+                        name
+                        for name, parameter in model.named_parameters()
+                        if parameter.grad is not None and not torch.isfinite(parameter.grad).all()
+                    ]
+                    if consecutive_amp_overflows >= 8
+                    else []
                 )
-            if scaler is not None:
-                scaler.step(optimizer)
-                scaler.update()
+                scaler.update(new_scale=max(old_scale / 2.0, 1.0))
+                optimizer.zero_grad(set_to_none=True)
+                print(
+                    f"   [AMP] skipped batch {batch_idx + 1} after gradient overflow; "
+                    f"scale {old_scale:g} -> {scaler.get_scale():g}"
+                )
+                if consecutive_amp_overflows >= 8:
+                    names = ", ".join(bad_parameters[:12]) or "unknown"
+                    raise FloatingPointError(
+                        "Persistent non-finite AMP gradients after 8 scale reductions "
+                        f"at batch {batch_idx + 1}; parameters: {names}"
+                    ) from exc
             else:
-                optimizer.step()
+                consecutive_amp_overflows = 0
+                if scaler is not None:
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    optimizer.step()
 
         tot_loss += loss.item()
         for k in comps:
@@ -537,7 +565,9 @@ def main():
     # ------------------------------------------------------------------
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     scheduler = build_scheduler(optimizer, args)
-    scaler = torch.cuda.amp.GradScaler(enabled=args.amp and device.type == "cuda")
+    scaler = torch.amp.GradScaler(
+        "cuda", enabled=args.amp and device.type == "cuda", init_scale=1024.0
+    )
 
     print(f"Optimizer : AdamW  (lr={args.lr}, amp={scaler.is_enabled()})")
     print(
@@ -681,8 +711,7 @@ def main():
 
         if not np.isfinite(val_psnr) or not np.isfinite(val_ssim):
             raise FloatingPointError(
-                f"Non-finite validation metric at epoch {epoch}: "
-                f"PSNR={val_psnr}, SSIM={val_ssim}"
+                f"Non-finite validation metric at epoch {epoch}: PSNR={val_psnr}, SSIM={val_ssim}"
             )
 
         scheduler.step()

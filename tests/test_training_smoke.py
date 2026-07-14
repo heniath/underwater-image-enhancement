@@ -74,3 +74,66 @@ def test_validation_split_disables_augmentation_and_is_stable():
     assert first_val.indices == second_val.indices
     assert first_val.dataset.augment is False
     assert first_train.dataset.augment is True
+
+
+def test_amp_gradient_overflow_skips_step_and_reduces_scale():
+    class NanBackward(torch.autograd.Function):
+        @staticmethod
+        def forward(ctx, value):
+            return value
+
+        @staticmethod
+        def backward(ctx, gradient):
+            return torch.full_like(gradient, torch.nan)
+
+    class UnstableModel(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.weight = torch.nn.Parameter(torch.tensor(1.0))
+
+        def forward(self, value):
+            return NanBackward.apply(value * self.weight)
+
+    class FakeScaler:
+        def __init__(self):
+            self.current_scale = 1024.0
+
+        def is_enabled(self):
+            return True
+
+        def scale(self, loss):
+            return loss
+
+        def unscale_(self, optimizer):
+            return None
+
+        def get_scale(self):
+            return self.current_scale
+
+        def update(self, new_scale=None):
+            self.current_scale = float(new_scale)
+
+        def step(self, optimizer):
+            raise AssertionError("overflowed optimizer step must be skipped")
+
+    model = UnstableModel()
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+    inputs = torch.ones(1, 1)
+    targets = torch.zeros(1, 1)
+    loader = DataLoader(TensorDataset(inputs, targets), batch_size=1)
+    scaler = FakeScaler()
+
+    def criterion(prediction, _target):
+        return prediction.mean(), {"l1": 1.0}
+
+    train_epoch(
+        model,
+        loader,
+        optimizer,
+        criterion,
+        torch.device("cpu"),
+        scaler=scaler,
+    )
+
+    assert model.weight.item() == 1.0
+    assert scaler.get_scale() == 512.0
