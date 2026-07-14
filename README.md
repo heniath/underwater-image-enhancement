@@ -173,6 +173,29 @@ automatically caps the value to the number of GPUs actually available.
 Promote a candidate when it gains roughly 0.20 dB validation PSNR without a
 material SSIM loss. Confirm it with multiple seeds before a full-data run.
 
+### U-Net training-recipe screen (Kaggle)
+
+After the architecture screen, compare the fixed `unet_5ch` + GUPDM model
+with four matched loss/scheduler recipes:
+
+```bash
+DATA_ROOT=/kaggle/input/euvp-dataset/EUVP \
+OUTPUT_ROOT=/kaggle/working/training_recipe_screen \
+NUM_GPUS=2 BATCH_SIZE=16 \
+bash scripts/experiments/run_training_recipe_screen.sh
+```
+
+The runner performs four 12-epoch runs on `underwater_scenes` with seed 42,
+ranks their best validation PSNR (SSIM breaks ties), verifies matched split
+sizes and finite histories, and checks that the single-cycle cosine learning
+rate approaches `1e-6`. Each recipe has its own checkpoint/history directory.
+It never evaluates the held-out test set.
+
+A recipe is promoted only when it improves the control by at least 0.20 dB
+and loses no more than 0.002 SSIM. The JSON summary under `results/` records
+the selection. Confirm a promoted recipe with seeds 123 and 3407 before full
+EUVP training; if none passes, retain the existing U-Net recipe.
+
 Key arguments (see `data/options.py` for the full list):
 
 | Argument | Default | Description |

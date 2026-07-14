@@ -4,6 +4,7 @@
 
 import json
 import os
+import random
 import sys
 import time
 from datetime import datetime
@@ -216,8 +217,16 @@ def train_epoch(model, loader, optimizer, criterion, device):
         optimizer.zero_grad(set_to_none=True)
         pred = model(inp)
         loss, parts = criterion(pred, gt)
+        if not torch.isfinite(loss):
+            raise FloatingPointError(
+                f"Non-finite training loss at batch {batch_idx + 1}: {loss.item()}"
+            )
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+        grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+        if not torch.isfinite(grad_norm):
+            raise FloatingPointError(
+                f"Non-finite gradient norm at batch {batch_idx + 1}: {grad_norm.item()}"
+            )
         optimizer.step()
 
         tot_loss += loss.item()
@@ -236,10 +245,14 @@ def train_epoch(model, loader, optimizer, criterion, device):
 def val_loss_epoch(model, loader, criterion, device):
     model.eval()
     tot = 0.0
-    for inp, gt in loader:
+    for batch_idx, (inp, gt) in enumerate(loader):
         inp, gt = inp.to(device), gt.to(device)
         pred = model(inp)
         loss, _ = criterion(pred, gt)
+        if not torch.isfinite(loss):
+            raise FloatingPointError(
+                f"Non-finite validation loss at batch {batch_idx + 1}: {loss.item()}"
+            )
         tot += loss.item()
     return tot / len(loader)
 
@@ -311,6 +324,7 @@ def main():
     # ------------------------------------------------------------------
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
+    random.seed(args.seed)
     if device.type == "cuda":
         torch.cuda.manual_seed_all(args.seed)
         torch.backends.cudnn.deterministic = True
@@ -488,6 +502,30 @@ def main():
     # Training state
     # ------------------------------------------------------------------
     history = {
+        "_meta": {
+            "model": args.model,
+            "dataset": args.dataset,
+            "euvp_subset": args.euvp_subset,
+            "prior_method": args.prior_method,
+            "seed": args.seed,
+            "train_samples": n_train,
+            "validation_samples": n_val,
+            "batch_size": args.batchSize,
+            "crop_size": args.cropSize,
+            "epochs": args.nEpochs,
+            "learning_rate": args.lr,
+            "num_gpus": n_gpus,
+            "l1_weight": args.L1_weight,
+            "perceptual_weight": args.perceptual_weight,
+            "ssim_weight": args.SSIM_weight,
+            "scheduler": (
+                "cosine_restart_cyclic"
+                if args.cos_restart_cyclic
+                else "cosine_single_cycle"
+                if args.cos_restart
+                else "step"
+            ),
+        },
         "train_loss": [],
         "val_loss": [],
         "val_psnr": [],
@@ -496,6 +534,7 @@ def main():
     }
 
     best_psnr = 0.0
+    best_ssim = float("-inf")
     best_epoch = 0
     es = EarlyStopping(patience=args.early_stop_patience, min_delta=1e-4, mode="max")
 
@@ -529,6 +568,12 @@ def main():
             val_psnr = history["val_psnr"][-1] if history["val_psnr"] else 0.0
             val_ssim = history["val_ssim"][-1] if history["val_ssim"] else 0.0
 
+        if not np.isfinite(val_psnr) or not np.isfinite(val_ssim):
+            raise FloatingPointError(
+                f"Non-finite validation metric at epoch {epoch}: "
+                f"PSNR={val_psnr}, SSIM={val_ssim}"
+            )
+
         scheduler.step()
         cur_lr = optimizer.param_groups[0]["lr"]
         elapsed = time.time() - t0
@@ -541,8 +586,9 @@ def main():
         history["lr"].append(cur_lr)
 
         # Save best immediately when PSNR improves
-        if val_psnr > best_psnr + 1e-4:
+        if (val_psnr, val_ssim) > (best_psnr, best_ssim):
             best_psnr = val_psnr
+            best_ssim = val_ssim
             best_epoch = epoch
             save_ckpt(
                 model,
