@@ -53,9 +53,16 @@ class HybridMambaBlock(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Apply the block to channel-first features."""
-        scanned = self.ss2d(self.norm(x.permute(0, 2, 3, 1).contiguous()))
-        scanned = scanned.permute(0, 3, 1, 2).contiguous()
-        output = x + scanned * self.mamba_scale.view(1, -1, 1, 1)
+        # The fused selective-scan backward can produce NaNs for fp16 inputs,
+        # even when its upstream gradient is initially zero (as it is behind
+        # our zero-initialized residual head). Keep only SS2D in fp32 while
+        # allowing the surrounding CNN, attention, and loss to use AMP.
+        scan_input = x.permute(0, 2, 3, 1).contiguous()
+        with torch.autocast(device_type=x.device.type, enabled=False):
+            scanned = self.ss2d(self.norm(scan_input.float()))
+            scanned = scanned.permute(0, 3, 1, 2).contiguous()
+            scanned = scanned * self.mamba_scale.view(1, -1, 1, 1)
+        output = x + scanned.to(dtype=x.dtype)
         if self.use_local_branch:
             local = self.pointwise(self.depthwise(self.local_norm(x)))
             output = output + local * self.local_scale.view(1, -1, 1, 1)

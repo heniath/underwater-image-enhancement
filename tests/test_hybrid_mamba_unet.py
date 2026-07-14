@@ -113,6 +113,20 @@ def test_hybrid_block_scales_receive_gradients(use_local_branch):
         assert block.local_scale is None
 
 
+def test_hybrid_block_keeps_ss2d_stable_under_autocast():
+    block = HybridMambaBlock(4, d_state=2, use_local_branch=False)
+    sample = torch.randn(2, 4, 3, 5, dtype=torch.bfloat16, requires_grad=True)
+    with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+        output = block(sample)
+        loss = output.square().mean()
+    loss.backward()
+    assert output.dtype == sample.dtype
+    assert all(
+        parameter.grad is None or torch.isfinite(parameter.grad).all()
+        for parameter in block.parameters()
+    )
+
+
 @pytest.mark.parametrize("shape", [(2, 5, 11, 8), (1, 9, 6, 8)])
 def test_window_partition_round_trip_for_odd_nonsquare_maps(shape):
     sample = torch.randn(shape)
