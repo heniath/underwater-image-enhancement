@@ -17,6 +17,7 @@ ACCUMULATION_STEPS="${ACCUMULATION_STEPS:-2}"
 CROP_SIZE="${CROP_SIZE:-256}"
 EPOCHS="${EPOCHS:-30}"
 EUVP_SUBSET="${EUVP_SUBSET:-all}"
+AMP="${AMP:-true}"
 ALLOW_SLOW_FALLBACK="${ALLOW_SLOW_FALLBACK:-0}"
 PREFLIGHT_ONLY="${PREFLIGHT_ONLY:-0}"
 PREFLIGHT_EUVP_SUBSET="${PREFLIGHT_EUVP_SUBSET:-underwater_scenes}"
@@ -73,7 +74,7 @@ COMMON_ARGS=(
   --warmup-epochs 3
   --early-stop-patience "${EPOCHS}"
   --val-interval 1
-  --amp true
+  --amp "${AMP}"
   --pretrained-backbone false
   --seed 42
 )
@@ -115,7 +116,7 @@ for model in "${MODELS[@]}"; do
 done
 
 python - "${CHECKPOINT_ROOT}" "${RESULT_ROOT}" "${RUN_ID}" "${EPOCHS}" \
-  "$((BATCH_SIZE * ACCUMULATION_STEPS))" "${EUVP_SUBSET}" <<'PY'
+  "$((BATCH_SIZE * ACCUMULATION_STEPS))" "${EUVP_SUBSET}" "${AMP}" <<'PY'
 import gc
 import json
 import pathlib
@@ -129,6 +130,7 @@ run_id = sys.argv[3]
 epochs = int(sys.argv[4])
 effective_batch_size = int(sys.argv[5])
 euvp_subset = sys.argv[6]
+amp_enabled = sys.argv[7].lower() == "true"
 models = [
     "unet_3ch",
     "hybridmamba_core_3ch",
@@ -195,6 +197,7 @@ report = {
         "epochs": epochs,
         "seed": 42,
         "effective_batch_size": effective_batch_size,
+        "amp": amp_enabled,
         "models": rows,
     },
     "full_vs_core": core_delta,

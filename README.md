@@ -207,6 +207,11 @@ DATA_ROOT=/path/to/EUVP OUTPUT_ROOT=./hybrid_mamba_ablation \
 # Run all five models on only one paired EUVP subset.
 EUVP_SUBSET=underwater_scenes DATA_ROOT=/path/to/EUVP \
   OUTPUT_ROOT=./hybrid_mamba_scenes ./run_hybrid_mamba_ablation.sh
+
+# Full FP32 for numerical stability, retaining effective batch size 16.
+AMP=false BATCH_SIZE=4 ACCUMULATION_STEPS=4 EUVP_SUBSET=underwater_scenes \
+  DATA_ROOT=/path/to/EUVP OUTPUT_ROOT=./hybrid_mamba_scenes_fp32 \
+  ./run_hybrid_mamba_ablation.sh
 ```
 
 The slow checkpointed PyTorch scan is available only when explicitly enabled
