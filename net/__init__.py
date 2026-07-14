@@ -3,6 +3,7 @@
 import _bootstrap  # noqa: F401
 from uwir.models import (
     ALL_MODEL_NAMES,
+    HybridMambaUNet,
     MambaUNet,
     MambaVisionUNet,
     MobileNetUNet,
@@ -26,6 +27,7 @@ __all__ = [
     "MobileNetUNet",
     "MambaVisionUNet",
     "MambaUNet",
+    "HybridMambaUNet",
     "compute_physics_maps",
     "compute_physics_maps_gdcp",
     "compute_physics_maps_gupdm",

@@ -7,7 +7,14 @@ from torch.utils.data import DataLoader, TensorDataset
 pytest.importorskip("torchvision")
 pytest.importorskip("kornia")
 
-from uwir.cli.train import EarlyStopping, load_ckpt, save_ckpt, train_epoch, val_loss_epoch
+from uwir.cli.train import (
+    EarlyStopping,
+    _split_train_validation,
+    load_ckpt,
+    save_ckpt,
+    train_epoch,
+    val_loss_epoch,
+)
 from uwir.losses import CompositeLoss
 from uwir.models import build_model
 
@@ -47,3 +54,23 @@ def test_early_stopping():
     assert not stopping(1.0)
     assert not stopping(0.9)
     assert stopping(0.8)
+
+
+def test_validation_split_disables_augmentation_and_is_stable():
+    class DummyDataset(torch.utils.data.Dataset):
+        def __init__(self):
+            self.augment = True
+            self.input_files = [f"root/subset/trainA/{index}.png" for index in range(20)]
+
+        def __len__(self):
+            return len(self.input_files)
+
+        def __getitem__(self, index):
+            return index, self.augment
+
+    first_train, first_val = _split_train_validation(DummyDataset(), seed=42)
+    second_train, second_val = _split_train_validation(DummyDataset(), seed=42)
+    assert first_train.indices == second_train.indices
+    assert first_val.indices == second_val.indices
+    assert first_val.dataset.augment is False
+    assert first_train.dataset.augment is True

@@ -19,6 +19,7 @@ import time
 import cv2
 import numpy as np
 import torch
+import torch.nn.functional as F
 from scipy.ndimage import sobel
 from skimage.color import deltaE_ciede2000, rgb2lab
 from skimage.metrics import peak_signal_noise_ratio as psnr_sk
@@ -139,8 +140,69 @@ def compute_uiqm(image):
 # ============================================================
 
 
+def _tile_starts(length: int, tile_size: int, overlap: int) -> list[int]:
+    if length <= tile_size:
+        return [0]
+    step = tile_size - overlap
+    starts = list(range(0, length - tile_size + 1, step))
+    if starts[-1] != length - tile_size:
+        starts.append(length - tile_size)
+    return starts
+
+
 @torch.no_grad()
-def evaluate_loader(model, loader, device, max_samples=None, desc="Evaluating"):
+def tiled_predict(
+    model,
+    image: torch.Tensor,
+    tile_size: int = 512,
+    overlap: int = 64,
+    factor: int = 32,
+) -> torch.Tensor:
+    """Reflection-pad and run overlap-blended native-resolution inference."""
+    if image.shape[0] != 1:
+        return torch.cat(
+            [tiled_predict(model, sample[None], tile_size, overlap, factor) for sample in image],
+            dim=0,
+        )
+    if overlap < 0 or overlap >= tile_size:
+        raise ValueError("overlap must satisfy 0 <= overlap < tile_size")
+    original_h, original_w = image.shape[-2:]
+    pad_h = (-original_h) % factor
+    pad_w = (-original_w) % factor
+    mode = "reflect" if original_h > pad_h and original_w > pad_w else "replicate"
+    padded = F.pad(image, (0, pad_w, 0, pad_h), mode=mode)
+    height, width = padded.shape[-2:]
+    if height <= tile_size and width <= tile_size:
+        return model(padded)[..., :original_h, :original_w]
+    extra_h = max(0, tile_size - height)
+    extra_w = max(0, tile_size - width)
+    if extra_h or extra_w:
+        padded = F.pad(padded, (0, extra_w, 0, extra_h), mode="replicate")
+        height, width = padded.shape[-2:]
+
+    output = torch.zeros((1, 3, height, width), device=image.device, dtype=image.dtype)
+    weights = torch.zeros_like(output[:, :1])
+    window_1d = torch.hann_window(tile_size, periodic=False, device=image.device).clamp_min(0.05)
+    window = (window_1d[:, None] * window_1d[None, :])[None, None]
+    for top in _tile_starts(height, tile_size, overlap):
+        for left in _tile_starts(width, tile_size, overlap):
+            tile = padded[..., top : top + tile_size, left : left + tile_size]
+            prediction = model(tile)
+            output[..., top : top + tile_size, left : left + tile_size] += prediction * window
+            weights[..., top : top + tile_size, left : left + tile_size] += window
+    return (output / weights.clamp_min(1e-8))[..., :original_h, :original_w]
+
+
+@torch.no_grad()
+def evaluate_loader(
+    model,
+    loader,
+    device,
+    max_samples=None,
+    desc="Evaluating",
+    tile_size: int | None = None,
+    tile_overlap: int = 64,
+):
     """
     Run the full metric suite over a DataLoader.
 
@@ -170,13 +232,21 @@ def evaluate_loader(model, loader, device, max_samples=None, desc="Evaluating"):
             start_evt = torch.cuda.Event(enable_timing=True)
             end_evt = torch.cuda.Event(enable_timing=True)
             start_evt.record()
-            pred = model(inp)
+            pred = (
+                tiled_predict(model, inp, tile_size, tile_overlap)
+                if tile_size
+                else model(inp)
+            )
             end_evt.record()
             torch.cuda.synchronize()
             total_time_ms += start_evt.elapsed_time(end_evt)
         else:
             t0 = time.perf_counter()
-            pred = model(inp)
+            pred = (
+                tiled_predict(model, inp, tile_size, tile_overlap)
+                if tile_size
+                else model(inp)
+            )
             total_time_ms += (time.perf_counter() - t0) * 1000.0
 
         pred_np = pred.cpu().permute(0, 2, 3, 1).numpy().clip(0, 1)

@@ -173,6 +173,68 @@ automatically caps the value to the number of GPUs actually available.
 Promote a candidate when it gains roughly 0.20 dB validation PSNR without a
 material SSIM loss. Confirm it with multiple seeds before a full-data run.
 
+### Hybrid Mamba restoration U-Net
+
+`HybridMambaUNet` keeps convolutional features at full and half resolution,
+uses the repository's local four-direction SS2D from H/4 through H/16, and
+reconstructs with gated convolutional skips. It does not download or execute
+the Hugging Face MambaVision implementation.
+
+| Model | Input contract | Cumulative component |
+|---|---|---|
+| `hybridmamba_core_3ch` | RGB | SS2D, ECA, gated decoder |
+| `hybridmamba_local_3ch` | RGB | parallel depthwise local branch |
+| `hybridmamba_attn_3ch` | RGB | one H/16 window-attention block |
+| `hybridmambafusion_7ch_tv` | `[RGB, t, veiling-RGB]` | zero-gated physics pyramid |
+
+The model is self-contained, but practical training requires the fused
+selective scan from `mamba_ssm`. The dedicated five-run screen checks for that
+kernel, two GPUs, AMP, and the fixed seed-42 EUVP split. It trains for 30 epochs
+at effective batch size 16 and writes best validation metrics, component
+deltas, parameter counts, time, and peak memory to a JSON report. It does not
+evaluate EUVP-515 or UIEB-90.
+
+```bash
+pip install mamba-ssm --no-build-isolation
+
+# Recommended one-epoch hardware/kernel check before the five runs.
+PREFLIGHT_ONLY=1 DATA_ROOT=/path/to/EUVP ./run_hybrid_mamba_ablation.sh
+
+DATA_ROOT=/path/to/EUVP OUTPUT_ROOT=./hybrid_mamba_ablation \
+  ./run_hybrid_mamba_ablation.sh
+```
+
+The slow checkpointed PyTorch scan is available only when explicitly enabled
+with `ALLOW_SLOW_FALLBACK=1`; it is intended for portability and tests, not the
+matched two-T4 screen.
+
+### Physics-gated metric improvement program
+
+Three color-preserving physics-fusion models accept
+`[RGB, transmission, veiling-RGB]` inputs. Their physics paths are injected
+through zero-initialized gates, so an unreliable prior can be ignored, and the
+output heads start as an RGB identity:
+
+| Model | RGB encoder | Context |
+|---|---|---|
+| `fusionunet_7ch_tv` | U-Net | none |
+| `asppfusion_7ch_tv` | U-Net | residual ASPP |
+| `denseasppfusion_7ch_tv` | ImageNet DenseNet-121 | residual ASPP |
+
+Run the complete four-model screen and three-seed paired confirmation program:
+
+```bash
+DATA_ROOT=/kaggle/input/euvp-dataset/EUVP \
+UIEB_ROOT=/kaggle/input/uieb-dataset/UIEB \
+OUTPUT_ROOT=/kaggle/working/metric_program \
+bash scripts/experiments/run_metric_improvement_program.sh
+```
+
+Training uses a fixed seed-42, subset-stratified split regardless of the model
+seed. Evaluation reports native-resolution overlap-tiled metrics and the legacy
+256×256 metrics. `--eval-benchmark uieb` selects the deterministic UIEB-90
+cross-dataset manifest; UIEB images are never used by this program for training.
+
 ### U-Net training-recipe screen (Kaggle)
 
 After the architecture screen, compare the fixed `unet_5ch` + GUPDM model

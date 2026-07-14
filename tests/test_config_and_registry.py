@@ -47,3 +47,17 @@ def test_context_models_preserve_image_shape(model_name):
         output = model(torch.rand(1, 5, 32, 32))
     assert output.shape == (1, 3, 32, 32)
     assert torch.isfinite(output).all()
+
+
+@pytest.mark.parametrize(
+    "model_name",
+    ["fusionunet_7ch_tv", "asppfusion_7ch_tv", "denseasppfusion_7ch_tv"],
+)
+def test_fusion_models_are_registered_and_start_as_identity(model_name):
+    assert parse_model_variant(model_name).in_channels == 7
+    model = build_model(model_name, pretrained_backbone=False).eval()
+    input_tensor = torch.rand(1, 7, 64, 64)
+    with torch.no_grad():
+        output = model(input_tensor)
+    assert output.shape == (1, 3, 64, 64)
+    assert torch.allclose(output, input_tensor[:, :3], atol=1e-4)

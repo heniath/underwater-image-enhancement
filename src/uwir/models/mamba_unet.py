@@ -282,7 +282,7 @@ class SS2D(nn.Module):
 
         A = -torch.exp(self.A_log)  # (K, d_inner, d_state)
 
-        if _MAMBA_CUDA:
+        if _MAMBA_CUDA and x.is_cuda:
             # ---- CUDA-fused path -------------------------------------------
             # selective_scan_fn handles softplus(delta + bias) internally.
             # Returns (B, d_inner, L) per direction — no Python loop needed.

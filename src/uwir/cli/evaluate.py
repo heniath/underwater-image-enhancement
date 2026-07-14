@@ -7,6 +7,7 @@ import os
 import re
 import traceback
 from datetime import datetime
+from functools import partial
 from pathlib import Path
 
 import numpy as np
@@ -51,12 +52,29 @@ def collect_test_pairs(data_root):
     return pairs
 
 
+def collect_uieb_test_pairs(data_root, seed: int = 42, count: int = 90):
+    """Return a fixed, deterministic UIEB-90 cross-dataset benchmark."""
+    input_dir = Path(data_root) / "raw-890"
+    target_dir = Path(data_root) / "reference-890"
+    targets = {path.stem: path for path in target_dir.iterdir() if path.suffix in IMG_EXTS}
+    pairs = [
+        (str(path), str(targets[path.stem]))
+        for path in sorted(input_dir.iterdir())
+        if path.suffix in IMG_EXTS and path.stem in targets
+    ]
+    generator = np.random.default_rng(seed)
+    selected = sorted(generator.choice(len(pairs), size=min(count, len(pairs)), replace=False))
+    return [pairs[index] for index in selected]
+
+
 class TestDataset(data.Dataset):
-    def __init__(self, pairs, img_size=256):
+    def __init__(self, pairs, img_size=None):
         import torchvision.transforms as transforms
 
         self.pairs = pairs
-        self.resize = transforms.Resize((img_size, img_size), antialias=True)
+        self.resize = (
+            transforms.Resize((img_size, img_size), antialias=True) if img_size else None
+        )
         self.to_tensor = transforms.ToTensor()
 
     def __len__(self):
@@ -66,8 +84,14 @@ class TestDataset(data.Dataset):
         from PIL import Image
 
         inp_path, gt_path = self.pairs[idx]
-        inp_t = self.to_tensor(self.resize(Image.open(inp_path).convert("RGB")))
-        gt_t = self.to_tensor(self.resize(Image.open(gt_path).convert("RGB")))
+        inp_image = Image.open(inp_path).convert("RGB")
+        gt_image = Image.open(gt_path).convert("RGB")
+        if inp_image.size != gt_image.size:
+            raise ValueError(f"Pair size mismatch: {inp_path}={inp_image.size}, {gt_path}={gt_image.size}")
+        if self.resize:
+            inp_image, gt_image = self.resize(inp_image), self.resize(gt_image)
+        inp_t = self.to_tensor(inp_image)
+        gt_t = self.to_tensor(gt_image)
         # Return dummy filename strings so _collate_val (which unpacks *_) works
         return inp_t, gt_t, "", ""
 
@@ -163,14 +187,29 @@ def main():
     np.random.seed(args.seed)
 
     physics_extractor = _resolve_physics_extractor(args.prior_method)
+    from uwir.physics import PhysicsConfig, compute_physics_features
+
+    fusion_extractor = partial(
+        compute_physics_features,
+        config=PhysicsConfig(
+            guided_filter_radius=args.guided_filter_radius,
+            guided_filter_eps=args.guided_filter_eps,
+        ),
+    )
 
     # ------------------------------------------------------------------
     # Dataset (built once; each model gets its own DataLoader)
     # ------------------------------------------------------------------
-    print(f"\nLoading test samples from '{args.data_train_euvp}' …")
-    test_pairs = collect_test_pairs(args.data_train_euvp)
-    val_ds = TestDataset(test_pairs, img_size=args.cropSize)
-    print(f"Test set size : {len(val_ds)} images")
+    data_root = args.data_train_euvp if args.eval_benchmark == "euvp" else args.data_train_uieb
+    print(f"\nLoading {args.eval_benchmark} test samples from '{data_root}' …")
+    test_pairs = (
+        collect_test_pairs(data_root)
+        if args.eval_benchmark == "euvp"
+        else collect_uieb_test_pairs(data_root, seed=42)
+    )
+    native_ds = TestDataset(test_pairs)
+    legacy_ds = TestDataset(test_pairs, img_size=args.cropSize)
+    print(f"Test set size : {len(native_ds)} images")
 
     checkpoint_dir = args.checkpoint_dir
     if not os.path.exists(checkpoint_dir):
@@ -210,21 +249,38 @@ def main():
             print(f"  Loaded epoch={ckpt_epoch}  stored metrics={ckpt_metrics}")
 
             def collate_fn(batch, mode=physics_mode):
-                return _collate_val(batch, mode, physics_extractor)
+                return _collate_val(batch, mode, physics_extractor, fusion_extractor)
 
-            val_loader = data.DataLoader(
-                val_ds,
-                batch_size=getattr(args, "batch_size", 1),
+            def make_loader(dataset, batch_size):
+                return data.DataLoader(
+                dataset,
+                batch_size=batch_size,
                 shuffle=False,
                 num_workers=getattr(args, "threads", 0),
                 pin_memory=device.type == "cuda",
                 drop_last=False,
                 collate_fn=collate_fn,
-            )
+                )
 
-            test_metrics, n_test = evaluate_loader(
-                model, val_loader, device, desc=f"Testing {run_name}"
+            legacy_loader = make_loader(legacy_ds, getattr(args, "batch_size", 1))
+            native_loader = make_loader(native_ds, 1)
+
+            legacy_metrics, n_test = evaluate_loader(
+                model, legacy_loader, device, desc=f"Legacy testing {run_name}"
             )
+            if args.native_eval:
+                test_metrics, n_native = evaluate_loader(
+                    model,
+                    native_loader,
+                    device,
+                    desc=f"Native testing {run_name}",
+                    tile_size=args.tile_size,
+                    tile_overlap=args.tile_overlap,
+                )
+                if n_native != n_test:
+                    raise RuntimeError("Native and legacy evaluation sample counts differ")
+            else:
+                test_metrics = legacy_metrics
 
             if n_test > 0:
                 print(f"\n  TEST RESULTS  (n={n_test})")
@@ -276,6 +332,7 @@ def main():
                 "best_epoch": ckpt_epoch,
                 "ckpt_metrics": ckpt_metrics,
                 "test_metrics": test_metrics,
+                "test_metrics_legacy_256": legacy_metrics,
                 "macs_g": macs_g,
                 "params_m": params_m,
                 "training_time_min": training_time_min,
@@ -307,11 +364,14 @@ def main():
         "_meta": {
             "timestamp": datetime.now().isoformat(timespec="seconds"),
             "device": str(device),
-            "data_root": args.data_train_euvp,
+            "data_root": data_root,
             "checkpoint_dir": checkpoint_dir,
             "prior_method": args.prior_method,
             "crop_size": args.cropSize,
             "seed": args.seed,
+            "benchmark": args.eval_benchmark,
+            "pair_manifest": test_pairs,
+            "metric_version": 2,
         },
         "runs": all_results,
     }

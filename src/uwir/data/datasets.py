@@ -38,20 +38,21 @@ class UIEBDataset(data.Dataset):
         data_dir (str): Root directory that contains 'raw-890/' and
                         'reference-890/' sub-folders.
         transform: Torchvision transform applied to both images (e.g. Resize + ToTensor).
-        augment (bool): Apply random hflip / vflip / ±10° rotation to both images
+        augment (bool): Apply random aligned crop and hflip / vflip to both images
                         simultaneously (training only). Default: False.
     """
 
     INPUT_DIR = "raw-890"
     GT_DIR = "reference-890"
 
-    def __init__(self, data_dir, transform=None, augment=False, in_memory=False):
+    def __init__(self, data_dir, transform=None, augment=False, in_memory=False, img_size=None):
         super().__init__()
         self.input_dir = join(data_dir, self.INPUT_DIR)
         self.gt_dir = join(data_dir, self.GT_DIR)
         self.transform = transform
         self.augment = augment
         self.in_memory = in_memory
+        self.img_size = img_size
 
         # Stem-name matching (robust against ordering differences)
         gt_dict = {
@@ -89,12 +90,15 @@ class UIEBDataset(data.Dataset):
         _, file_in = os.path.split(self.input_files[index])
         _, file_gt = os.path.split(self.gt_files[index])
 
-        if self.transform:
-            img_in = self.transform(img_in)
-            img_gt = self.transform(img_gt)
+        if self.img_size:
+            img_in, img_gt = _paired_resize_crop(img_in, img_gt, self.img_size, self.augment)
 
         if self.augment:
             img_in, img_gt = _paired_augment(img_in, img_gt)
+
+        if self.transform:
+            img_in = self.transform(img_in)
+            img_gt = self.transform(img_gt)
 
         return img_in, img_gt, file_in, file_gt
 
@@ -107,13 +111,35 @@ class UIEBDataset(data.Dataset):
 # ---------------------------------------------------------------------------
 
 
+def _paired_resize_crop(img_in, img_gt, size: int, random_crop: bool):
+    """Aspect-preserving resize followed by an aligned square crop."""
+    if img_in.size != img_gt.size:
+        raise ValueError(
+            f"Paired images must have identical sizes, got {img_in.size} and {img_gt.size}"
+        )
+    img_in = TF.resize(img_in, size, antialias=True)
+    img_gt = TF.resize(img_gt, size, antialias=True)
+    width, height = img_in.size
+    if random_crop:
+        top = random.randint(0, max(0, height - size))
+        left = random.randint(0, max(0, width - size))
+    else:
+        top = max(0, (height - size) // 2)
+        left = max(0, (width - size) // 2)
+    return (
+        TF.crop(img_in, top, left, size, size),
+        TF.crop(img_gt, top, left, size, size),
+    )
+
+
 def _paired_augment(img_in, img_gt):
     """
     Apply the same random geometric transforms to both images.
     Matches the notebook's _augment() method:
       - 50 % random horizontal flip
       - 50 % random vertical flip
-      - 50 % random rotation in [−10°, +10°]
+    Rotation is intentionally omitted: its zero-filled borders corrupt the
+    physics estimates and add artificial paired targets.
 
     Args:
         img_in, img_gt: PIL Images (after Resize, before ToTensor).
@@ -126,10 +152,6 @@ def _paired_augment(img_in, img_gt):
     if random.random() > 0.5:
         img_in = TF.vflip(img_in)
         img_gt = TF.vflip(img_gt)
-    if random.random() > 0.5:
-        angle = random.uniform(-10, 10)
-        img_in = TF.rotate(img_in, angle)
-        img_gt = TF.rotate(img_gt, angle)
     return img_in, img_gt
 
 
@@ -163,13 +185,15 @@ class EUVPDataset(data.Dataset):
                          'underwater_scenes'.  Pass 'all' or a list to
                          combine multiple subsets (notebook default).
         transform: Applied to both input and GT images (e.g. Resize + ToTensor).
-        augment (bool): Apply random hflip / vflip / ±10° rotation to both
+        augment (bool): Apply random aligned crop and hflip / vflip to both
                         images simultaneously (training only). Default: False.
     """
 
     SUBSETS = ("underwater_imagenet", "underwater_dark", "underwater_scenes")
 
-    def __init__(self, data_dir, subset="all", transform=None, augment=False, in_memory=False):
+    def __init__(
+        self, data_dir, subset="all", transform=None, augment=False, in_memory=False, img_size=None
+    ):
         super().__init__()
 
         # Resolve subset list
@@ -187,6 +211,7 @@ class EUVPDataset(data.Dataset):
         self.transform = transform
         self.augment = augment
         self.in_memory = in_memory
+        self.img_size = img_size
         self.input_files = []
         self.gt_files = []
 
@@ -225,12 +250,15 @@ class EUVPDataset(data.Dataset):
         _, file_in = os.path.split(self.input_files[index])
         _, file_gt = os.path.split(self.gt_files[index])
 
-        if self.transform:
-            img_in = self.transform(img_in)
-            img_gt = self.transform(img_gt)
+        if self.img_size:
+            img_in, img_gt = _paired_resize_crop(img_in, img_gt, self.img_size, self.augment)
 
         if self.augment:
             img_in, img_gt = _paired_augment(img_in, img_gt)
+
+        if self.transform:
+            img_in = self.transform(img_in)
+            img_gt = self.transform(img_gt)
 
         return img_in, img_gt, file_in, file_gt
 
@@ -264,7 +292,9 @@ class UFO120Dataset(data.Dataset):
         "test": ("test/lrd", "test/hr"),
     }
 
-    def __init__(self, data_dir, split="train", transform=None, augment=False, in_memory=False):
+    def __init__(
+        self, data_dir, split="train", transform=None, augment=False, in_memory=False, img_size=None
+    ):
         super().__init__()
 
         assert split in self.SPLIT_MAP, f"split must be 'train' or 'test', got '{split}'"
@@ -276,6 +306,7 @@ class UFO120Dataset(data.Dataset):
         self.transform = transform
         self.augment = augment
         self.in_memory = in_memory
+        self.img_size = img_size
 
         # Stem-name matching
         gt_dict = {
@@ -306,12 +337,15 @@ class UFO120Dataset(data.Dataset):
         _, file_in = os.path.split(self.input_files[index])
         _, file_gt = os.path.split(self.gt_files[index])
 
-        if self.transform:
-            img_in = self.transform(img_in)
-            img_gt = self.transform(img_gt)
+        if self.img_size:
+            img_in, img_gt = _paired_resize_crop(img_in, img_gt, self.img_size, self.augment)
 
         if self.augment:
             img_in, img_gt = _paired_augment(img_in, img_gt)
+
+        if self.transform:
+            img_in = self.transform(img_in)
+            img_gt = self.transform(img_gt)
 
         return img_in, img_gt, file_in, file_gt
 

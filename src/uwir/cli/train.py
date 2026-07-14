@@ -2,12 +2,15 @@
 # train.py  –  Training loop
 # ============================================================
 
+import copy
 import json
 import os
 import random
 import sys
 import time
 from datetime import datetime
+from functools import partial
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -16,6 +19,7 @@ import torch.utils.data as data
 
 from uwir.config import option
 from uwir.models import build_model, parse_model_variant
+from uwir.physics import PhysicsConfig, compute_physics_features
 from uwir.training.schedulers import (
     CosineAnnealingRestartCyclicLR,
     CosineAnnealingRestartLR,
@@ -77,6 +81,7 @@ def _add_physics_channels(
     rgb_tensor: torch.Tensor,
     mode: str,
     physics_extractor=None,
+    fusion_extractor=None,
 ) -> torch.Tensor:
     """
     Append physics-derived channels to an RGB tensor.
@@ -94,6 +99,16 @@ def _add_physics_channels(
     """
     if mode == "none":
         return rgb_tensor
+
+    if mode == "tv":
+        if fusion_extractor is None:
+            from uwir.physics import compute_physics_features
+
+            fusion_extractor = compute_physics_features
+        image = rgb_tensor.permute(1, 2, 0).numpy().astype(np.float32)
+        features = fusion_extractor(image)
+        maps = torch.from_numpy(features.as_7ch_maps()).permute(2, 0, 1)
+        return torch.cat([rgb_tensor, maps], dim=0)
 
     if physics_extractor is None:
         from uwir.physics import compute_physics_maps
@@ -119,7 +134,9 @@ def _add_physics_channels(
     raise ValueError(f"Unknown physics mode: '{mode}'")
 
 
-def _collate_train(batch, physics_mode: str, physics_extractor=None):
+def _collate_train(
+    batch, physics_mode: str, physics_extractor=None, fusion_extractor=None
+):
     """
     Custom collate that:
       - Drops the filename strings returned by the dataset.
@@ -130,15 +147,62 @@ def _collate_train(batch, physics_mode: str, physics_extractor=None):
     inps = []
     gts = []
     for inp, gt, *_ in batch:
-        inp = _add_physics_channels(inp, physics_mode, physics_extractor)
+        inp = _add_physics_channels(
+            inp, physics_mode, physics_extractor, fusion_extractor
+        )
         inps.append(inp)
         gts.append(gt)
     return torch.stack(inps), torch.stack(gts)
 
 
-def _collate_val(batch, physics_mode: str, physics_extractor=None):
+def _collate_val(batch, physics_mode: str, physics_extractor=None, fusion_extractor=None):
     """Same as _collate_train but for validation paired datasets."""
-    return _collate_train(batch, physics_mode, physics_extractor)
+    return _collate_train(batch, physics_mode, physics_extractor, fusion_extractor)
+
+
+def _validation_copy(dataset):
+    """Shallow-copy a dataset tree with stochastic augmentation disabled."""
+    if isinstance(dataset, data.ConcatDataset):
+        return data.ConcatDataset([_validation_copy(child) for child in dataset.datasets])
+    cloned = copy.copy(dataset)
+    if hasattr(cloned, "augment"):
+        cloned.augment = False
+    return cloned
+
+
+def _split_train_validation(dataset, seed: int, fraction: float = 0.10):
+    """Return train/validation subsets with a deterministic stratified EUVP split."""
+    generator = torch.Generator().manual_seed(seed)
+    groups: dict[str, list[int]] = {}
+    if hasattr(dataset, "input_files"):
+        for index, filename in enumerate(dataset.input_files):
+            path = Path(filename)
+            group = path.parent.parent.name if path.parent.name == "trainA" else "all"
+            groups.setdefault(group, []).append(index)
+    else:
+        groups["all"] = list(range(len(dataset)))
+
+    train_indices: list[int] = []
+    val_indices: list[int] = []
+    for indices in groups.values():
+        order = torch.randperm(len(indices), generator=generator).tolist()
+        n_val = max(1, int(len(indices) * fraction))
+        val_indices.extend(indices[position] for position in order[:n_val])
+        train_indices.extend(indices[position] for position in order[n_val:])
+    train_indices.sort()
+    val_indices.sort()
+    return (
+        data.Subset(dataset, train_indices),
+        data.Subset(_validation_copy(dataset), val_indices),
+    )
+
+
+def _subset_manifest(subset) -> list[str]:
+    """Return stable input paths for a Subset when its base exposes them."""
+    base = subset.dataset
+    if hasattr(base, "input_files"):
+        return [str(base.input_files[index]) for index in subset.indices]
+    return [str(index) for index in subset.indices]
 
 
 # ============================================================
@@ -206,7 +270,15 @@ def load_ckpt(path, model, optimizer=None, device="cpu"):
 # ============================================================
 
 
-def train_epoch(model, loader, optimizer, criterion, device):
+def train_epoch(
+    model,
+    loader,
+    optimizer,
+    criterion,
+    device,
+    scaler=None,
+    accumulation_steps: int = 1,
+):
     model.train()
     tot_loss = 0.0
     comps = {"l1": 0.0, "perceptual": 0.0, "ssim_loss": 0.0}
@@ -214,20 +286,35 @@ def train_epoch(model, loader, optimizer, criterion, device):
     # BỎ TQDM, DÙNG ENUMERATE THÔNG THƯỜNG
     for batch_idx, (inp, gt) in enumerate(loader):
         inp, gt = inp.to(device), gt.to(device)
-        optimizer.zero_grad(set_to_none=True)
-        pred = model(inp)
-        loss, parts = criterion(pred, gt)
+        if batch_idx % accumulation_steps == 0:
+            optimizer.zero_grad(set_to_none=True)
+        amp_enabled = scaler is not None and scaler.is_enabled()
+        with torch.autocast(device_type=device.type, enabled=amp_enabled):
+            pred = model(inp)
+            loss, parts = criterion(pred, gt)
         if not torch.isfinite(loss):
             raise FloatingPointError(
                 f"Non-finite training loss at batch {batch_idx + 1}: {loss.item()}"
             )
-        loss.backward()
-        grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-        if not torch.isfinite(grad_norm):
-            raise FloatingPointError(
-                f"Non-finite gradient norm at batch {batch_idx + 1}: {grad_norm.item()}"
-            )
-        optimizer.step()
+        scaled_loss = loss / accumulation_steps
+        if scaler is not None:
+            scaler.scale(scaled_loss).backward()
+        else:
+            scaled_loss.backward()
+        should_step = (batch_idx + 1) % accumulation_steps == 0 or batch_idx + 1 == len(loader)
+        if should_step:
+            if scaler is not None:
+                scaler.unscale_(optimizer)
+            grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            if not torch.isfinite(grad_norm):
+                raise FloatingPointError(
+                    f"Non-finite gradient norm at batch {batch_idx + 1}: {grad_norm.item()}"
+                )
+            if scaler is not None:
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                optimizer.step()
 
         tot_loss += loss.item()
         for k in comps:
@@ -242,13 +329,14 @@ def train_epoch(model, loader, optimizer, criterion, device):
 
 
 @torch.no_grad()
-def val_loss_epoch(model, loader, criterion, device):
+def val_loss_epoch(model, loader, criterion, device, amp_enabled: bool = False):
     model.eval()
     tot = 0.0
     for batch_idx, (inp, gt) in enumerate(loader):
         inp, gt = inp.to(device), gt.to(device)
-        pred = model(inp)
-        loss, _ = criterion(pred, gt)
+        with torch.autocast(device_type=device.type, enabled=amp_enabled):
+            pred = model(inp)
+            loss, _ = criterion(pred, gt)
         if not torch.isfinite(loss):
             raise FloatingPointError(
                 f"Non-finite validation loss at batch {batch_idx + 1}: {loss.item()}"
@@ -338,6 +426,11 @@ def main():
     # ------------------------------------------------------------------
     _, in_channels, physics_mode = parse_model_variant(args.model)
     physics_extractor = _resolve_physics_extractor(args.prior_method)
+    physics_config = PhysicsConfig(
+        guided_filter_radius=args.guided_filter_radius,
+        guided_filter_eps=args.guided_filter_eps,
+    )
+    fusion_extractor = partial(compute_physics_features, config=physics_config)
 
     # ------------------------------------------------------------------
     # Model
@@ -355,6 +448,8 @@ def main():
         print(f"GPUs      : {n_gpus}  (DataParallel on {gpu_ids})")
     else:
         print("GPUs      : 1  (single)")
+    if device.type == "cuda":
+        torch.cuda.reset_peak_memory_stats()
     print(f"Model     : {args.model}  (in_channels={in_channels}, physics={physics_mode})")
     print(f"Prior     : {args.prior_method}")
 
@@ -362,10 +457,10 @@ def main():
     # Datasets & DataLoaders
     # ------------------------------------------------------------------
     def collate_fn_train(batch):
-        return _collate_train(batch, physics_mode, physics_extractor)
+        return _collate_train(batch, physics_mode, physics_extractor, fusion_extractor)
 
     def collate_fn_val(batch):
-        return _collate_val(batch, physics_mode, physics_extractor)
+        return _collate_val(batch, physics_mode, physics_extractor, fusion_extractor)
 
     # Training dataset
     if args.dataset == "euvp":
@@ -400,13 +495,8 @@ def main():
     # Validation: 10 % hold-out from the training set (paired → gives GT for
     # loss + metric computation).  Fixed seed for reproducibility.
     # NOTE: EUVP has no separate testA/testB; validation/ is unpaired (no GT).
-    n_val = max(1, int(len(train_ds) * 0.10))
-    n_train = len(train_ds) - n_val
-    train_ds, val_ds = data.random_split(
-        train_ds,
-        [n_train, n_val],
-        generator=torch.Generator().manual_seed(args.seed),
-    )
+    train_ds, val_ds = _split_train_validation(train_ds, args.split_seed)
+    n_train, n_val = len(train_ds), len(val_ds)
     print(f"Dataset   : {args.dataset}  (train={n_train}, val={n_val})")
 
     train_loader = data.DataLoader(
@@ -445,10 +535,11 @@ def main():
     # ------------------------------------------------------------------
     # Optimizer & Scheduler
     # ------------------------------------------------------------------
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     scheduler = build_scheduler(optimizer, args)
+    scaler = torch.cuda.amp.GradScaler(enabled=args.amp and device.type == "cuda")
 
-    print(f"Optimizer : Adam  (lr={args.lr})")
+    print(f"Optimizer : AdamW  (lr={args.lr}, amp={scaler.is_enabled()})")
     print(
         f"Scheduler : {'CosineRestartCyclic' if args.cos_restart_cyclic else 'CosineRestart' if args.cos_restart else 'StepLR'}"
         f"  (warmup={args.warmup_epochs if args.start_warmup else 0} epochs)"
@@ -472,6 +563,13 @@ def main():
     BEST_PATH = os.path.join(CKPT_DIR, "best_model.pth")
     LAST_PATH = os.path.join(CKPT_DIR, "last_model.pth")
     os.makedirs(CKPT_DIR, exist_ok=True)
+    split_manifest = {
+        "seed": args.split_seed,
+        "train": _subset_manifest(train_ds),
+        "validation": _subset_manifest(val_ds),
+    }
+    with open(os.path.join(CKPT_DIR, "split_manifest.json"), "w", encoding="utf-8") as file:
+        json.dump(split_manifest, file, indent=2)
 
     # ---- log file (tee stdout → terminal + file) ---------------------------
     LOG_DIR = args.log_dir
@@ -508,6 +606,7 @@ def main():
             "euvp_subset": args.euvp_subset,
             "prior_method": args.prior_method,
             "seed": args.seed,
+            "split_seed": args.split_seed,
             "train_samples": n_train,
             "validation_samples": n_val,
             "batch_size": args.batchSize,
@@ -554,14 +653,26 @@ def main():
         t0 = time.time()
 
         # Train
-        tr_loss, tr_comps = train_epoch(model, train_loader, optimizer, criterion, device)
+        tr_loss, tr_comps = train_epoch(
+            model,
+            train_loader,
+            optimizer,
+            criterion,
+            device,
+            scaler=scaler,
+            accumulation_steps=args.grad_accumulation_steps,
+        )
 
         # Val loss (every epoch)
-        vl_loss = val_loss_epoch(model, val_loader, criterion, device)
+        vl_loss = val_loss_epoch(
+            model, val_loader, criterion, device, amp_enabled=scaler.is_enabled()
+        )
 
-        # Val metrics (every LOG_EVERY epochs or epoch 1)
-        if epoch == 1 or epoch % LOG_EVERY == 0:
-            val_metrics, _ = evaluate_loader(model, val_loader, device, max_samples=100)
+        # Validation metrics use the complete deterministic hold-out. Early
+        # stopping advances only on epochs where these values are fresh.
+        fresh_validation = epoch == 1 or epoch % args.val_interval == 0
+        if fresh_validation:
+            val_metrics, _ = evaluate_loader(model, val_loader, device)
             val_psnr = val_metrics["psnr"]
             val_ssim = val_metrics["ssim"]
         else:
@@ -620,7 +731,7 @@ def main():
             )
 
         # Early stopping
-        if es(val_psnr):
+        if fresh_validation and es(val_psnr):
             print(
                 f"\nEarly stopping at epoch {epoch}  "
                 f"(no improvement for {args.early_stop_patience} evals)"
@@ -631,6 +742,10 @@ def main():
     save_ckpt(model, optimizer, epoch, {"psnr": val_psnr, "ssim": val_ssim}, LAST_PATH)
 
     total_min = (time.time() - train_start) / 60
+    history["_meta"]["training_time_min"] = total_min
+    history["_meta"]["peak_gpu_memory_mb"] = (
+        torch.cuda.max_memory_allocated() / 1024**2 if device.type == "cuda" else None
+    )
     print(f"\n{'=' * 65}")
     print(f"  Done.  Best PSNR: {best_psnr:.4f} dB at epoch {best_epoch}")
     print(f"  Total training time: {total_min:.1f} min")

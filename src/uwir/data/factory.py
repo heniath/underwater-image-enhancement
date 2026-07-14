@@ -6,7 +6,6 @@ that train.py only needs a single import.
 
 from torchvision.transforms import (
     Compose,
-    Resize,
     ToTensor,
 )
 
@@ -28,12 +27,8 @@ def _train_transform(img_size: int = 256):
     Augmentation (hflip / vflip / rotation) is applied *separately* by the
     dataset classes so that both images in a pair receive the same transform.
     """
-    return Compose(
-        [
-            Resize((img_size, img_size)),
-            ToTensor(),
-        ]
-    )
+    del img_size
+    return Compose([ToTensor()])
 
 
 def _eval_transform():
@@ -66,6 +61,7 @@ def get_euvp_training_set(
         transform=_train_transform(img_size),
         augment=True,
         in_memory=in_memory,
+        img_size=img_size,
     )
 
 
@@ -81,7 +77,11 @@ def get_uieb_training_set(
         in_memory : Load images into RAM during initialization.
     """
     return UIEBDataset(
-        data_dir, transform=_train_transform(img_size), augment=True, in_memory=in_memory
+        data_dir,
+        transform=_train_transform(img_size),
+        augment=True,
+        in_memory=in_memory,
+        img_size=img_size,
     )
 
 
@@ -102,6 +102,7 @@ def get_ufo120_training_set(
         transform=_train_transform(img_size),
         augment=True,
         in_memory=in_memory,
+        img_size=img_size,
     )
 
 

@@ -206,6 +206,12 @@ def option():
         default=20,
         help="Stop training if val SSIM does not improve for this many epochs (proposal §4.5)",
     )
+    parser.add_argument(
+        "--val-interval",
+        type=int,
+        default=1,
+        help="Compute validation metrics every N epochs; early stopping advances only then",
+    )
 
     # ------------------------------------------------------------------
     # Physics front-end
@@ -222,7 +228,7 @@ def option():
         "--guided-filter-radius",
         "--guided_filter_radius",
         type=int,
-        default=40,
+        default=15,
         help="Radius for the guided image filter used to refine the transmission map",
     )
     parser.add_argument(
@@ -399,6 +405,20 @@ def option():
         help="Directory for saving validation output images",
     )
     parser.add_argument(
+        "--native-eval",
+        type=_str2bool,
+        default=True,
+        help="Evaluate at native resolution in addition to the legacy square resize",
+    )
+    parser.add_argument(
+        "--eval-benchmark",
+        choices=["euvp", "uieb"],
+        default="euvp",
+        help="Paired benchmark evaluated by uwir-evaluate",
+    )
+    parser.add_argument("--tile-size", type=int, default=512)
+    parser.add_argument("--tile-overlap", type=int, default=64)
+    parser.add_argument(
         "--checkpoint-dir",
         "--checkpoint_dir",
         type=str,
@@ -420,6 +440,12 @@ def option():
         "--seed", type=int, default=42, help="Global random seed for reproducibility"
     )
     parser.add_argument(
+        "--split-seed",
+        type=int,
+        default=42,
+        help="Fixed data-split seed, independent of the model-training seed",
+    )
+    parser.add_argument(
         "--grad-clip",
         "--grad_clip",
         type=_str2bool,
@@ -432,6 +458,18 @@ def option():
         type=_str2bool,
         default=False,
         help="Enable anomaly detection (slow; use for debugging only)",
+    )
+    parser.add_argument(
+        "--amp",
+        type=_str2bool,
+        default=True,
+        help="Use automatic mixed precision on CUDA",
+    )
+    parser.add_argument(
+        "--grad-accumulation-steps",
+        type=int,
+        default=1,
+        help="Accumulate this many mini-batches before each optimizer step",
     )
 
     # ------------------------------------------------------------------
