@@ -203,6 +203,10 @@ PREFLIGHT_ONLY=1 DATA_ROOT=/path/to/EUVP ./run_hybrid_mamba_ablation.sh
 
 DATA_ROOT=/path/to/EUVP OUTPUT_ROOT=./hybrid_mamba_ablation \
   ./run_hybrid_mamba_ablation.sh
+
+# Run all five models on only one paired EUVP subset.
+EUVP_SUBSET=underwater_scenes DATA_ROOT=/path/to/EUVP \
+  OUTPUT_ROOT=./hybrid_mamba_scenes ./run_hybrid_mamba_ablation.sh
 ```
 
 The slow checkpointed PyTorch scan is available only when explicitly enabled

@@ -16,6 +16,7 @@ BATCH_SIZE="${BATCH_SIZE:-8}"
 ACCUMULATION_STEPS="${ACCUMULATION_STEPS:-2}"
 CROP_SIZE="${CROP_SIZE:-256}"
 EPOCHS="${EPOCHS:-30}"
+EUVP_SUBSET="${EUVP_SUBSET:-all}"
 ALLOW_SLOW_FALLBACK="${ALLOW_SLOW_FALLBACK:-0}"
 PREFLIGHT_ONLY="${PREFLIGHT_ONLY:-0}"
 PREFLIGHT_EUVP_SUBSET="${PREFLIGHT_EUVP_SUBSET:-underwater_scenes}"
@@ -103,7 +104,7 @@ fi
 for model in "${MODELS[@]}"; do
   python -m uwir.cli.train \
     "${COMMON_ARGS[@]}" \
-    --euvp-subset all \
+    --euvp-subset "${EUVP_SUBSET}" \
     --model "${model}" \
     --epochs "${EPOCHS}" \
     --snapshots "${EPOCHS}" \
@@ -114,7 +115,7 @@ for model in "${MODELS[@]}"; do
 done
 
 python - "${CHECKPOINT_ROOT}" "${RESULT_ROOT}" "${RUN_ID}" "${EPOCHS}" \
-  "$((BATCH_SIZE * ACCUMULATION_STEPS))" <<'PY'
+  "$((BATCH_SIZE * ACCUMULATION_STEPS))" "${EUVP_SUBSET}" <<'PY'
 import gc
 import json
 import pathlib
@@ -127,6 +128,7 @@ result_root = pathlib.Path(sys.argv[2])
 run_id = sys.argv[3]
 epochs = int(sys.argv[4])
 effective_batch_size = int(sys.argv[5])
+euvp_subset = sys.argv[6]
 models = [
     "unet_3ch",
     "hybridmamba_core_3ch",
@@ -189,6 +191,7 @@ core_delta = {
 report = {
     "screen": {
         "dataset": "EUVP fixed training hold-out only",
+        "euvp_subset": euvp_subset,
         "epochs": epochs,
         "seed": 42,
         "effective_batch_size": effective_batch_size,
