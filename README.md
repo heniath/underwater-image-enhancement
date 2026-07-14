@@ -197,7 +197,8 @@ evaluate EUVP-515 or UIEB-90.
 ```bash
 pip install mamba-ssm --no-build-isolation
 
-# Recommended one-epoch hardware/kernel check before the five runs.
+# Recommended one-epoch hardware/kernel check before the five runs. It uses
+# only underwater_scenes by default; override with PREFLIGHT_EUVP_SUBSET.
 PREFLIGHT_ONLY=1 DATA_ROOT=/path/to/EUVP ./run_hybrid_mamba_ablation.sh
 
 DATA_ROOT=/path/to/EUVP OUTPUT_ROOT=./hybrid_mamba_ablation \

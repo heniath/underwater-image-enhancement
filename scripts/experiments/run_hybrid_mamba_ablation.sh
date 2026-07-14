@@ -18,6 +18,7 @@ CROP_SIZE="${CROP_SIZE:-256}"
 EPOCHS="${EPOCHS:-30}"
 ALLOW_SLOW_FALLBACK="${ALLOW_SLOW_FALLBACK:-0}"
 PREFLIGHT_ONLY="${PREFLIGHT_ONLY:-0}"
+PREFLIGHT_EUVP_SUBSET="${PREFLIGHT_EUVP_SUBSET:-underwater_scenes}"
 RUN_ID="${RUN_ID:-hybrid_mamba_seed42_$(date +%Y%m%d_%H%M%S)}"
 
 CHECKPOINT_ROOT="${OUTPUT_ROOT}/checkpoints"
@@ -52,7 +53,6 @@ PY
 COMMON_ARGS=(
   --dataset euvp
   --data-train-euvp "${DATA_ROOT}"
-  --euvp-subset all
   --crop-size "${CROP_SIZE}"
   --batch-size "${BATCH_SIZE}"
   --grad-accumulation-steps "${ACCUMULATION_STEPS}"
@@ -86,9 +86,10 @@ MODELS=(
 )
 
 if [[ "${PREFLIGHT_ONLY}" == "1" ]]; then
-  echo "Running one-epoch fused-scan/AMP/checkpointing preflight."
+  echo "Running one-epoch fused-scan/AMP/checkpointing preflight on ${PREFLIGHT_EUVP_SUBSET}."
   python -m uwir.cli.train \
     "${COMMON_ARGS[@]}" \
+    --euvp-subset "${PREFLIGHT_EUVP_SUBSET}" \
     --model hybridmamba_core_3ch \
     --epochs 1 \
     --snapshots 1 \
@@ -102,6 +103,7 @@ fi
 for model in "${MODELS[@]}"; do
   python -m uwir.cli.train \
     "${COMMON_ARGS[@]}" \
+    --euvp-subset all \
     --model "${model}" \
     --epochs "${EPOCHS}" \
     --snapshots "${EPOCHS}" \
