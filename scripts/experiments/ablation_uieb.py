@@ -49,6 +49,7 @@ from pathlib import Path
 import numpy as np
 import torch
 import torch.utils.data as data
+from torchvision.transforms import Compose, Resize, ToTensor
 
 # ---------------------------------------------------------------------------
 # Ensure project root is importable when run from any cwd
@@ -59,7 +60,6 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 # Project imports
 from uwir.data.datasets import UIEBDataset
-from uwir.data.factory import _train_transform
 from uwir.models import build_model, parse_model_variant
 from uwir.losses import CompositeLoss
 from uwir.metrics import evaluate_loader
@@ -513,18 +513,27 @@ def main():
     # -----------------------------------------------------------------------
     print(f"\nLoading UIEB dataset from '{args.data_uieb}' ...")
 
+    # This runner historically evaluates the fixed UIEB 800/90 protocol at
+    # 256x256.  The shared _train_transform now only converts to a tensor
+    # because resizing/cropping moved into the general dataset pipeline, so
+    # keep an explicit square resize here.  Otherwise variable-sized UIEB
+    # images reach torch.stack and the ablation crashes.
+    fixed_transform = Compose(
+        [Resize((args.cropSize, args.cropSize), antialias=True), ToTensor()]
+    )
+
     # No-augment instance — used to build the deterministic test subset
     # (augment=False ensures consistent sorted index ordering)
     uieb_noaug = UIEBDataset(
         args.data_uieb,
-        transform=_train_transform(args.cropSize),
+        transform=fixed_transform,
         augment=False,
         in_memory=args.in_memory,
     )
     # Augmented instance — used as the 800-image train/val pool
     uieb_aug = UIEBDataset(
         args.data_uieb,
-        transform=_train_transform(args.cropSize),
+        transform=fixed_transform,
         augment=True,
         in_memory=args.in_memory,
     )
