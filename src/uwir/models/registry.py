@@ -19,7 +19,7 @@ Naming convention
     <backbone>_<variant>
 
    backbone : unet | asppunet | mambabottleneck | mambaaspp | resnet |
-              mobilenet | mambavision | mambaunet
+              mobilenet | mbconv | mambavision | mambaunet
   variant  : 3ch | 4ch_t | 4ch_b | 5ch
 
 Physics modes
@@ -45,6 +45,7 @@ _BACKBONES = (
     "mambaaspp",
     "resnet",
     "mobilenet",
+    "mbconv",
     "mambavision",
     "mambaunet",
 )
@@ -199,6 +200,11 @@ def build_model(name: str, pretrained_backbone: bool = True) -> nn.Module:
         from .mobilenet_unet import MobileNetUNet
 
         return MobileNetUNet(in_channels=in_channels, pretrained=pretrained_backbone)
+
+    if backbone == "mbconv":
+        from .mbconv_unet import MBConvUNet
+
+        return MBConvUNet(in_channels=in_channels)
 
     if backbone == "mambavision":
         from .mambavision_unet import MambaVisionUNet
