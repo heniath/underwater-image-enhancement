@@ -4,7 +4,7 @@
 
 --model mobilenet_5ch
 --dataset euvp
---euvp_subset all
+--euvp_subset underwater_dark
 --pretrained_backbone True
 
 # Original training defaults, written here so the branch is reproducible.
