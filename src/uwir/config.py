@@ -167,6 +167,13 @@ def option():
         help="Batches prefetched per DataLoader worker when --threads > 0",
     )
     parser.add_argument(
+        "--log-batch-timing",
+        "--log_batch_timing",
+        type=_str2bool,
+        default=False,
+        help="Log average DataLoader wait time and train step time every 50 batches",
+    )
+    parser.add_argument(
         "--in-memory",
         "--in_memory",
         type=_str2bool,

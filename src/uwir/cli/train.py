@@ -285,14 +285,21 @@ def train_epoch(
     device,
     scaler=None,
     accumulation_steps: int = 1,
+    log_batch_timing: bool = False,
 ):
     model.train()
     tot_loss = 0.0
     comps = {"l1": 0.0, "perceptual": 0.0, "ssim_loss": 0.0}
     consecutive_amp_overflows = 0
+    data_wait_acc = 0.0
+    step_acc = 0.0
+    last_step_end = time.time()
 
     # BỎ TQDM, DÙNG ENUMERATE THÔNG THƯỜNG
     for batch_idx, (inp, gt) in enumerate(loader):
+        batch_ready = time.time()
+        if log_batch_timing:
+            data_wait_acc += batch_ready - last_step_end
         inp = inp.to(device, non_blocking=True)
         gt = gt.to(device, non_blocking=True)
         if batch_idx % accumulation_steps == 0:
@@ -362,7 +369,30 @@ def train_epoch(
 
         # Chỉ in log ra màn hình mỗi 50 batch để tránh tràn I/O
         if (batch_idx + 1) % 50 == 0:
-            print(f"   [Batch {batch_idx + 1}/{len(loader)}] Loss: {loss.item():.4f}")
+            if log_batch_timing and device.type == "cuda":
+                torch.cuda.synchronize()
+            step_end = time.time()
+            if log_batch_timing:
+                step_acc += step_end - batch_ready
+                window = 50
+                print(
+                    f"   [Batch {batch_idx + 1}/{len(loader)}] "
+                    f"Loss: {loss.item():.4f} | "
+                    f"data_wait: {data_wait_acc / window:.3f}s/b | "
+                    f"step: {step_acc / window:.3f}s/b"
+                )
+                data_wait_acc = 0.0
+                step_acc = 0.0
+            else:
+                print(f"   [Batch {batch_idx + 1}/{len(loader)}] Loss: {loss.item():.4f}")
+            last_step_end = step_end
+        else:
+            if log_batch_timing:
+                if device.type == "cuda":
+                    torch.cuda.synchronize()
+                step_end = time.time()
+                step_acc += step_end - batch_ready
+                last_step_end = step_end
 
     n = len(loader)
     return tot_loss / n, {k: v / n for k, v in comps.items()}
@@ -703,6 +733,7 @@ def main():
             device,
             scaler=scaler,
             accumulation_steps=args.grad_accumulation_steps,
+            log_batch_timing=args.log_batch_timing,
         )
 
         # Val loss (every epoch)
