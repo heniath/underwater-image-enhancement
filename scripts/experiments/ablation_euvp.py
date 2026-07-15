@@ -147,6 +147,10 @@ def _make_parser() -> argparse.ArgumentParser:
     # Misc
     p.add_argument("--gpu_mode", action="store_true", default=True)
     p.add_argument("--no_gpu", dest="gpu_mode", action="store_false")
+    p.add_argument(
+        "--num_gpus", type=int, default=1,
+        help="Number of CUDA GPUs to use with DataParallel.",
+    )
     p.add_argument("--pretrained_backbone", action="store_true", default=False,
                    help="Load pretrained ImageNet backbone (not applicable to plain UNet).")
     return p
@@ -207,6 +211,8 @@ def train_one_run(
 
     # ---- Model ------------------------------------------------------------
     model = build_model(variant, pretrained_backbone=args.pretrained_backbone).to(device)
+    if args.num_gpus > 1:
+        model = nn.DataParallel(model, device_ids=list(range(args.num_gpus)))
 
     # ---- Loss / optimiser / scheduler ------------------------------------
     criterion = CompositeLoss(
@@ -418,6 +424,16 @@ def main():
     num_runs = len(seeds)
 
     device = torch.device("cuda" if (args.gpu_mode and torch.cuda.is_available()) else "cpu")
+    available_gpus = torch.cuda.device_count() if device.type == "cuda" else 0
+    if args.num_gpus < 1:
+        parser.error("--num_gpus must be at least 1")
+    if device.type == "cuda" and args.num_gpus > available_gpus:
+        parser.error(
+            f"--num_gpus={args.num_gpus} requested, but only "
+            f"{available_gpus} CUDA GPU(s) are available"
+        )
+    if device.type != "cuda" and args.num_gpus > 1:
+        parser.error("--num_gpus > 1 requires CUDA")
     physics_extractor = _resolve_physics_extractor(args.prior_method)
 
     print(f"Device         : {device}")
@@ -425,6 +441,7 @@ def main():
     print(f"Variants       : {args.variants}")
     print(f"Seeds          : {seeds}  (num_runs={num_runs})")
     print(f"Epochs/run     : {args.nEpochs}")
+    print(f"GPUs           : {args.num_gpus}")
     print(f"Total runs     : {len(args.variants) * num_runs}")
     print(f"Checkpoint dir : {args.checkpoint_dir}")
 
@@ -541,6 +558,7 @@ def main():
             "checkpoint_dir": args.checkpoint_dir,
             "data_root":      args.data_train_euvp,
             "crop_size":      args.cropSize,
+            "num_gpus":       args.num_gpus,
         },
         "per_variant": {
             variant: {
