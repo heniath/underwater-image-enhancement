@@ -18,7 +18,7 @@ Naming convention
 -----------------
     <backbone>_<variant>
 
-   backbone : unet | asppunet | mambabottleneck | mambaaspp | resnet |
+   backbone : unet | unetpp | asppunet | mambabottleneck | mambaaspp | resnet |
               mobilenet | mbconv | mambavision | mambaunet
   variant  : 3ch | 4ch_t | 4ch_b | 5ch
 
@@ -40,6 +40,7 @@ import torch.nn as nn
 
 _BACKBONES = (
     "unet",
+    "unetpp",
     "asppunet",
     "mambabottleneck",
     "mambaaspp",
@@ -180,6 +181,11 @@ def build_model(name: str, pretrained_backbone: bool = True) -> nn.Module:
         from .unet import UNet5ch
 
         return UNet5ch(in_channels=in_channels)
+
+    if backbone == "unetpp":
+        from .unetpp import UNetPlusPlus5ch
+
+        return UNetPlusPlus5ch(in_channels=in_channels)
 
     if backbone in {"asppunet", "mambabottleneck", "mambaaspp"}:
         from .context_unet import ASPPUNet, MambaASPPUNet, MambaBottleneckUNet

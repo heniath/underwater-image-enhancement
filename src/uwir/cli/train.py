@@ -277,6 +277,36 @@ def load_ckpt(path, model, optimizer=None, device="cpu"):
 # ============================================================
 
 
+def _last_prediction(pred):
+    if isinstance(pred, (list, tuple)):
+        if not pred:
+            raise ValueError("Model returned an empty prediction list.")
+        return pred[-1]
+    return pred
+
+
+def _criterion_with_deep_supervision(criterion, pred, gt):
+    if not isinstance(pred, (list, tuple)):
+        return criterion(pred, gt)
+
+    losses = []
+    part_sums = {}
+    for output in pred:
+        loss, parts = criterion(output, gt)
+        losses.append(loss)
+        for key, value in parts.items():
+            part_sums[key] = part_sums.get(key, 0.0) + value
+
+    if not losses:
+        raise ValueError("Model returned an empty prediction list.")
+
+    total = torch.stack(losses).mean()
+    count = len(losses)
+    avg_parts = {key: value / count for key, value in part_sums.items()}
+    avg_parts["total"] = total.item()
+    return total, avg_parts
+
+
 def train_epoch(
     model,
     loader,
@@ -307,7 +337,7 @@ def train_epoch(
         amp_enabled = scaler is not None and scaler.is_enabled()
         with torch.autocast(device_type=device.type, enabled=amp_enabled):
             pred = model(inp)
-            loss, parts = criterion(pred, gt)
+            loss, parts = _criterion_with_deep_supervision(criterion, pred, gt)
         if not torch.isfinite(loss):
             raise FloatingPointError(
                 f"Non-finite training loss at batch {batch_idx + 1}: {loss.item()}"
@@ -407,6 +437,7 @@ def val_loss_epoch(model, loader, criterion, device, amp_enabled: bool = False):
         gt = gt.to(device, non_blocking=True)
         with torch.autocast(device_type=device.type, enabled=amp_enabled):
             pred = model(inp)
+            pred = _last_prediction(pred)
             loss, _ = criterion(pred, gt)
         if not torch.isfinite(loss):
             raise FloatingPointError(
