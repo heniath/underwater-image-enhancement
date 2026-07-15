@@ -4,6 +4,17 @@ Replaces the CIDNet low-light options with UWIR-specific arguments.
 """
 
 import argparse
+import shlex
+
+
+class ConfigArgumentParser(argparse.ArgumentParser):
+    """Allow args files via @path, with shell-like splitting and comments."""
+
+    def convert_arg_line_to_args(self, arg_line):
+        line = arg_line.strip()
+        if not line or line.startswith('#'):
+            return []
+        return shlex.split(line, comments=True)
 
 
 def _str2bool(v):
@@ -16,7 +27,10 @@ def _str2bool(v):
 
 
 def option():
-    parser = argparse.ArgumentParser(description='UWIR — Physics-Guided Underwater Image Restoration')
+    parser = ConfigArgumentParser(
+        description='UWIR — Physics-Guided Underwater Image Restoration',
+        fromfile_prefix_chars='@',
+    )
 
     # ------------------------------------------------------------------
     # Core training hyper-parameters
