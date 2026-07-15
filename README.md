@@ -2,6 +2,11 @@
 
 U-Net trained with physics-guided input channels (UDCP transmission map + background light) on the EUVP benchmark.
 
+Two model families are provided:
+
+- **Deterministic U-Net** (`train.py`) — the standard 4-level U-Net (`unet_*` and the ResNet / MobileNet / Mamba backbones).
+- **PUIE-UNet** (`PUIE-Unet.py`) — a **probabilistic** variant that grafts PUIE-Net's conditional-VAE mechanism (prior/posterior latent encoders + KL divergence, trained with an ELBO) onto the same deeper U-Net backbone. At inference it can run deterministically (MC) or average several prior samples (MP) for an ensembling boost.
+
 ---
 
 ## Environment Setup (Conda)
@@ -23,7 +28,13 @@ conda install pytorch torchvision torchaudio pytorch-cuda=12.1 -c pytorch -c nvi
 
 ```bash
 pip install -r requirements.txt
+pip install -e .
 ```
+
+The editable install exposes the preferred commands `uwir-train`,
+`uwir-evaluate`, `uwir-profile`, `uwir-puie-train`, and
+`uwir-puie-evaluate`. The historical scripts remain available as compatibility
+entry points.
 
 > **Note**: PyTorch is already installed via conda, so pip will skip it.
 > If pip tries to reinstall a CPU-only build, use
@@ -111,6 +122,152 @@ python train.py \
     --early_stop_patience 20
 ```
 
+### Fast ASPP + Mamba architecture screen (Kaggle)
+
+Three bottleneck-context ablations are available alongside the unchanged
+U-Net baseline:
+
+| Model prefix | Bottleneck context |
+|---|---|
+| `asppunet` | DeepLab-style ASPP |
+| `mambabottleneck` | Two projected VSS/Mamba blocks at H/16 |
+| `mambaaspp` | ASPP followed by the projected Mamba blocks |
+
+The context branches are residual and retain the standard U-Net
+encoder/decoder. This makes the comparison isolate context modelling rather
+than changing the whole backbone.
+
+In a Kaggle notebook, enable a GPU accelerator and run:
+
+```bash
+!git clone https://github.com/heniath/underwater-image-enhancement.git
+%cd underwater-image-enhancement
+
+# PyTorch is preinstalled on Kaggle. The fused scan is strongly recommended.
+!pip install -e .
+!pip install mamba-ssm --no-build-isolation
+
+# Replace this with the actual EUVP directory shown under /kaggle/input.
+!DATA_ROOT=/kaggle/input/euvp-dataset/EUVP \
+  OUTPUT_ROOT=/kaggle/working/fast_screen \
+  NUM_GPUS=2 \
+  bash scripts/experiments/run_fast_context_screen.sh
+```
+
+The runner trains `unet_5ch`, `asppunet_5ch`,
+`mambabottleneck_5ch`, and `mambaaspp_5ch` for 12 epochs on the same
+`underwater_scenes` split and prints a validation ranking at the end. It does
+not use the held-out test set for model selection.
+
+Settings can be overridden without editing the script:
+
+```bash
+DATA_ROOT=/kaggle/input/.../EUVP \
+BATCH_SIZE=8 NUM_GPUS=2 EPOCHS=20 SEED=123 PRIOR_METHOD=gupdm \
+bash scripts/experiments/run_fast_context_screen.sh
+```
+
+`NUM_GPUS` defaults to 2. Training uses both when Kaggle exposes two GPUs and
+automatically caps the value to the number of GPUs actually available.
+
+Promote a candidate when it gains roughly 0.20 dB validation PSNR without a
+material SSIM loss. Confirm it with multiple seeds before a full-data run.
+
+### Hybrid Mamba restoration U-Net
+
+`HybridMambaUNet` keeps convolutional features at full and half resolution,
+uses the repository's local four-direction SS2D from H/4 through H/16, and
+reconstructs with gated convolutional skips. It does not download or execute
+the Hugging Face MambaVision implementation.
+
+| Model | Input contract | Cumulative component |
+|---|---|---|
+| `hybridmamba_core_3ch` | RGB | SS2D, ECA, gated decoder |
+| `hybridmamba_local_3ch` | RGB | parallel depthwise local branch |
+| `hybridmamba_attn_3ch` | RGB | one H/16 window-attention block |
+| `hybridmambafusion_7ch_tv` | `[RGB, t, veiling-RGB]` | zero-gated physics pyramid |
+
+The model is self-contained, but practical training requires the fused
+selective scan from `mamba_ssm`. The dedicated five-run screen checks for that
+kernel, two GPUs, AMP, and the fixed seed-42 EUVP split. It trains for 30 epochs
+at effective batch size 16 and writes best validation metrics, component
+deltas, parameter counts, time, and peak memory to a JSON report. It does not
+evaluate EUVP-515 or UIEB-90.
+
+```bash
+pip install mamba-ssm --no-build-isolation
+
+# Recommended one-epoch hardware/kernel check before the five runs. It uses
+# only underwater_scenes by default; override with PREFLIGHT_EUVP_SUBSET.
+PREFLIGHT_ONLY=1 DATA_ROOT=/path/to/EUVP ./run_hybrid_mamba_ablation.sh
+
+DATA_ROOT=/path/to/EUVP OUTPUT_ROOT=./hybrid_mamba_ablation \
+  ./run_hybrid_mamba_ablation.sh
+
+# Run all five models on only one paired EUVP subset.
+EUVP_SUBSET=underwater_scenes DATA_ROOT=/path/to/EUVP \
+  OUTPUT_ROOT=./hybrid_mamba_scenes ./run_hybrid_mamba_ablation.sh
+
+# Full FP32 for numerical stability, retaining effective batch size 16.
+AMP=false BATCH_SIZE=4 ACCUMULATION_STEPS=4 EUVP_SUBSET=underwater_scenes \
+  DATA_ROOT=/path/to/EUVP OUTPUT_ROOT=./hybrid_mamba_scenes_fp32 \
+  ./run_hybrid_mamba_ablation.sh
+```
+
+The slow checkpointed PyTorch scan is available only when explicitly enabled
+with `ALLOW_SLOW_FALLBACK=1`; it is intended for portability and tests, not the
+matched two-T4 screen.
+
+### Physics-gated metric improvement program
+
+Three color-preserving physics-fusion models accept
+`[RGB, transmission, veiling-RGB]` inputs. Their physics paths are injected
+through zero-initialized gates, so an unreliable prior can be ignored, and the
+output heads start as an RGB identity:
+
+| Model | RGB encoder | Context |
+|---|---|---|
+| `fusionunet_7ch_tv` | U-Net | none |
+| `asppfusion_7ch_tv` | U-Net | residual ASPP |
+| `denseasppfusion_7ch_tv` | ImageNet DenseNet-121 | residual ASPP |
+
+Run the complete four-model screen and three-seed paired confirmation program:
+
+```bash
+DATA_ROOT=/kaggle/input/euvp-dataset/EUVP \
+UIEB_ROOT=/kaggle/input/uieb-dataset/UIEB \
+OUTPUT_ROOT=/kaggle/working/metric_program \
+bash scripts/experiments/run_metric_improvement_program.sh
+```
+
+Training uses a fixed seed-42, subset-stratified split regardless of the model
+seed. Evaluation reports native-resolution overlap-tiled metrics and the legacy
+256×256 metrics. `--eval-benchmark uieb` selects the deterministic UIEB-90
+cross-dataset manifest; UIEB images are never used by this program for training.
+
+### U-Net training-recipe screen (Kaggle)
+
+After the architecture screen, compare the fixed `unet_5ch` + GUPDM model
+with four matched loss/scheduler recipes:
+
+```bash
+DATA_ROOT=/kaggle/input/euvp-dataset/EUVP \
+OUTPUT_ROOT=/kaggle/working/training_recipe_screen \
+NUM_GPUS=2 BATCH_SIZE=16 \
+bash scripts/experiments/run_training_recipe_screen.sh
+```
+
+The runner performs four 12-epoch runs on `underwater_scenes` with seed 42,
+ranks their best validation PSNR (SSIM breaks ties), verifies matched split
+sizes and finite histories, and checks that the single-cycle cosine learning
+rate approaches `1e-6`. Each recipe has its own checkpoint/history directory.
+It never evaluates the held-out test set.
+
+A recipe is promoted only when it improves the control by at least 0.20 dB
+and loses no more than 0.002 SSIM. The JSON summary under `results/` records
+the selection. Confirm a promoted recipe with seeds 123 and 3407 before full
+EUVP training; if none passes, retain the existing U-Net recipe.
+
 Key arguments (see `data/options.py` for the full list):
 
 | Argument | Default | Description |
@@ -126,6 +283,76 @@ Key arguments (see `data/options.py` for the full list):
 | `--checkpoint_dir` | `./checkpoints/` | Where to save `.pth` files |
 
 Checkpoints are saved to `./checkpoints/` and the training history JSON to `./results/`.
+
+---
+
+## PUIE-UNet (Probabilistic variant)
+
+`PUIE-Unet.py` combines two ideas:
+
+- **From PUIE-Net** — a conditional VAE. A **prior** encoder sees only the (physics-augmented) input; a **posterior** encoder also sees the ground truth. Each branch produces two latent codes — a *mean* latent `u` and a *std* latent `s` — injected back into the decoder via FiLM modulation `InstanceNorm(feat) · |s| + u`. Training optimises an **ELBO** = reconstruction + `β · KL(posterior ‖ prior)`. At test time only the prior branch runs.
+- **From this repo** — the deeper 4-level U-Net backbone, the physics front-end (UDCP `t(x)` + background light `B`), `CompositeLoss` (L1 + VGG + SSIM) as the reconstruction term, plus the dataset loaders, scheduler, early-stopping, checkpointing and metric suite (all reused, not re-written).
+
+> The *backbone* part of `--model` is ignored here (the backbone is always PUIE-UNet); only the **channel variant** (`3ch` / `4ch_t` / `4ch_b` / `5ch`) is used to pick the physics front-end.
+
+### Training
+
+```bash
+conda activate uwir
+
+# 5-channel PUIE-UNet on UIEB, with KL annealing
+python PUIE-Unet.py \
+    --dataset uieb \
+    --data_train_uieb ./datasets/UIEB \
+    --model unet_5ch \
+    --batchSize 8 \
+    --nEpochs 200 \
+    --kl_weight 1.0 \
+    --kl_anneal_epochs 20 \
+    --run_name puie_unet_uieb
+
+# RGB-only PUIE-UNet on EUVP
+python PUIE-Unet.py --dataset euvp --data_train_euvp ./datasets/EUVP --model unet_3ch
+```
+
+PUIE-specific arguments (in addition to all of `train.py`'s; see `data/options.py`):
+
+| Argument | Default | Description |
+|---|---|---|
+| `--latent_dim` | `20` | Dimensionality of each (`u` / `s`) latent code |
+| `--kl_weight` | `1.0` | Max weight `β` on the KL term of the ELBO |
+| `--kl_anneal_epochs` | `20` | Linearly ramp `β` from 0 → `--kl_weight` over N epochs (`0` = off) |
+| `--num_samples` | `1` | Prior samples averaged at validation-metric time (`1` = MC, `>1` = MP) |
+
+The training log adds two columns, **Recon** and **KL**, so you can watch the ELBO terms separately. Checkpoints follow the same layout as `train.py` (`best_model.pth`, `last_model.pth`, `epoch_XXXX.pth`, `training_history.json`).
+
+### Inference / Evaluation
+
+`PUIE-Unet-test.py` loads a checkpoint, runs the prior branch, saves enhanced images, and (when ground truth is available) reports the full metric suite.
+
+```bash
+# Paired UIEB test set → save outputs + PSNR/SSIM/CIEDE2000/UCIQE/UIQM
+python PUIE-Unet-test.py \
+    --model unet_5ch \
+    --resume ./checkpoints/puie_unet_uieb_XXXXXXXX_XXXXXX/best_model.pth \
+    --data_val_uieb   ./datasets/UIEB/test/input \
+    --data_valgt_uieb ./datasets/UIEB/test/reference \
+    --num_samples 8 \
+    --val_folder ./results/puie_unet_uieb
+
+# No-reference folder (U45) → save outputs only
+python PUIE-Unet-test.py \
+    --model unet_3ch \
+    --resume ./checkpoints/run/best_model.pth \
+    --data_val_u45 ./datasets/U45 \
+    --num_samples 8 \
+    --val_folder ./results/puie_u45
+```
+
+- `--num_samples 1` → **MC** mode (deterministic, uses the prior means).
+- `--num_samples N > 1` → **MP** mode (averages N prior samples — reduces variance, often a small PSNR/SSIM gain).
+
+> **Important:** pass the same `--latent_dim` used during training (default `20`), otherwise the checkpoint's tensor shapes will not match.
 
 ---
 
@@ -162,25 +389,49 @@ Prints inference time, parameter count (M), and FLOPs (G) for a `256×256` input
 
 ```
 underwater-image-enhancement/
-├── data/
-│   ├── UWIRdataset.py   — UIEB, EUVP, UFO-120, U45 dataset classes
-│   ├── data.py          — Dataset factory functions
-│   ├── eval_sets.py     — Padded / simple eval loaders
-│   ├── options.py       — All training arguments (argparse)
-│   ├── scheduler.py     — GradualWarmup, CosineRestartLR schedulers
-│   └── util.py          — is_image_file, load_img helpers
-├── net/
-│   ├── unet.py          — UNet5ch model (3- or 5-channel input)
-│   └── physics.py       — UDCP transmission map + background light
-├── loss/
-│   └── losses.py        — CompositeLoss (L1 + VGG Perceptual + SSIM)
-├── measure_underwater.py — PSNR, SSIM, CIEDE2000, UCIQE, UIQM metrics
-├── train.py             — Main training loop
-├── eval.py              — Test-set evaluation
-├── net_test.py          — Model profiling (time / params / FLOPs)
-├── requirements.txt     — pip dependencies
+├── src/uwir/             — Installable library and command implementations
+│   ├── data/             — Dataset classes, transforms, and factories
+│   ├── models/           — Architectures and the central model registry
+│   ├── physics/          — UDCP, GDCP, and GUPDM priors
+│   ├── training/         — Schedulers and reusable training utilities
+│   ├── cli/              — Training, evaluation, PUIE, and profiling commands
+│   ├── config.py         — Typed configuration and CLI compatibility aliases
+│   ├── losses.py         — Composite loss implementation
+│   └── metrics.py        — Full- and no-reference underwater metrics
+├── scripts/              — Experiments, visualization, and diagnostics
+├── tests/                — Isolated pytest unit and smoke tests
+├── data/, net/, loss/    — Compatibility imports for existing user code
+├── train.py, eval.py     — Compatibility command wrappers
+├── pyproject.toml        — Packaging, Ruff, pytest, and console commands
 └── README.md
 ```
+
+New code should import from `uwir`, for example:
+
+```python
+from uwir.data import EUVPDataset
+from uwir.models import build_model, parse_model_variant
+```
+
+Legacy imports such as `from data.UWIRdataset import EUVPDataset` continue to
+resolve to the same class.
+
+## Development
+
+```bash
+pip install -e '.[dev]'
+ruff format --check .
+ruff check .
+pytest
+```
+
+Generated datasets, checkpoints, logs, figures, reports, and temporary
+artifacts are intentionally excluded from version control. Existing local
+artifacts are not removed by the cleanup.
+
+Runtime outputs are written beneath the current working directory by default:
+`./checkpoints`, `./logs`, and `./results`. Override these with the relevant
+CLI output-directory options when running from another location.
 
 ---
 
@@ -190,5 +441,7 @@ underwater-image-enhancement/
 |---|---|---|---|---|
 | `unet_3ch` (RGB only) | — | — | — | — |
 | `unet_5ch` (proposed) | — | — | — | — |
+| PUIE-UNet `unet_5ch` (MC) | — | — | — | — |
+| PUIE-UNet `unet_5ch` (MP, 8 samples) | — | — | — | — |
 
 *Fill in after training.*
