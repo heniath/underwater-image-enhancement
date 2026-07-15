@@ -153,6 +153,20 @@ def option():
         help="DataLoader worker threads (keep low to avoid OOM on Kaggle; 2-4 recommended)",
     )
     parser.add_argument(
+        "--persistent-workers",
+        "--persistent_workers",
+        type=_str2bool,
+        default=True,
+        help="Keep DataLoader workers alive between epochs when --threads > 0",
+    )
+    parser.add_argument(
+        "--prefetch-factor",
+        "--prefetch_factor",
+        type=int,
+        default=2,
+        help="Batches prefetched per DataLoader worker when --threads > 0",
+    )
+    parser.add_argument(
         "--in-memory",
         "--in_memory",
         type=_str2bool,

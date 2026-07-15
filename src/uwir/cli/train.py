@@ -156,6 +156,17 @@ def _collate_val(batch, physics_mode: str, physics_extractor=None, fusion_extrac
     return _collate_train(batch, physics_mode, physics_extractor, fusion_extractor)
 
 
+def _dataloader_kwargs(args, device: torch.device) -> dict:
+    kwargs = {
+        "num_workers": args.threads,
+        "pin_memory": device.type == "cuda",
+    }
+    if args.threads > 0:
+        kwargs["persistent_workers"] = args.persistent_workers
+        kwargs["prefetch_factor"] = max(1, args.prefetch_factor)
+    return kwargs
+
+
 def _validation_copy(dataset):
     """Shallow-copy a dataset tree with stochastic augmentation disabled."""
     if isinstance(dataset, data.ConcatDataset):
@@ -282,7 +293,8 @@ def train_epoch(
 
     # BỎ TQDM, DÙNG ENUMERATE THÔNG THƯỜNG
     for batch_idx, (inp, gt) in enumerate(loader):
-        inp, gt = inp.to(device), gt.to(device)
+        inp = inp.to(device, non_blocking=True)
+        gt = gt.to(device, non_blocking=True)
         if batch_idx % accumulation_steps == 0:
             optimizer.zero_grad(set_to_none=True)
         amp_enabled = scaler is not None and scaler.is_enabled()
@@ -361,7 +373,8 @@ def val_loss_epoch(model, loader, criterion, device, amp_enabled: bool = False):
     model.eval()
     tot = 0.0
     for batch_idx, (inp, gt) in enumerate(loader):
-        inp, gt = inp.to(device), gt.to(device)
+        inp = inp.to(device, non_blocking=True)
+        gt = gt.to(device, non_blocking=True)
         with torch.autocast(device_type=device.type, enabled=amp_enabled):
             pred = model(inp)
             loss, _ = criterion(pred, gt)
@@ -526,25 +539,24 @@ def main():
     train_ds, val_ds = _split_train_validation(train_ds, args.split_seed)
     n_train, n_val = len(train_ds), len(val_ds)
     print(f"Dataset   : {args.dataset}  (train={n_train}, val={n_val})")
+    loader_kwargs = _dataloader_kwargs(args, device)
 
     train_loader = data.DataLoader(
         train_ds,
         batch_size=args.batchSize,
         shuffle=args.shuffle,
-        num_workers=args.threads,
-        pin_memory=device.type == "cuda",
         drop_last=True,
         collate_fn=collate_fn_train,
+        **loader_kwargs,
     )
 
     val_loader = data.DataLoader(
         val_ds,
         batch_size=args.batchSize,
         shuffle=False,
-        num_workers=args.threads,
-        pin_memory=device.type == "cuda",
         drop_last=False,
         collate_fn=collate_fn_val,
+        **loader_kwargs,
     )
 
     print(f"Train set : {len(train_ds)} samples  ({len(train_loader)} batches of {args.batchSize})")

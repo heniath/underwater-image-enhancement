@@ -11,7 +11,6 @@ SSIMLoss           – 1 − SSIM (via kornia)
 CompositeLoss      – λ_l1·L1 + λ_perc·Perceptual + λ_ssim·SSIM
 """
 
-import kornia
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -88,6 +87,9 @@ class SSIMLoss(nn.Module):
     def __init__(self, window_size: int = 11):
         super().__init__()
         self.window_size = window_size
+        import kornia
+
+        self._kornia = kornia
 
     def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         """
@@ -98,7 +100,7 @@ class SSIMLoss(nn.Module):
         Returns:
             Tensor: scalar loss ∈ [0, 2].
         """
-        ssim_map = kornia.metrics.ssim(pred, target, self.window_size)
+        ssim_map = self._kornia.metrics.ssim(pred, target, self.window_size)
         return 1.0 - ssim_map.mean()
 
 
@@ -134,7 +136,7 @@ class CompositeLoss(nn.Module):
 
         self.l1 = nn.L1Loss()
         self.perc = VGGPerceptualLoss(device) if lambda_perc else None
-        self.ssim = SSIMLoss()
+        self.ssim = SSIMLoss() if lambda_ssim else None
 
     def forward(
         self,
@@ -154,7 +156,7 @@ class CompositeLoss(nn.Module):
         """
         l_l1 = self.l1(pred, target)
         l_perc = self.perc(pred, target) if self.perc is not None else pred.new_zeros(())
-        l_ssim = self.ssim(pred, target)
+        l_ssim = self.ssim(pred, target) if self.ssim is not None else pred.new_zeros(())
 
         total = self.lambda_l1 * l_l1 + self.lambda_perc * l_perc + self.lambda_ssim * l_ssim
 
