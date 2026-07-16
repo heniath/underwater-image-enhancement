@@ -82,3 +82,20 @@ class UNetPlusPlus5ch(nn.Module):
         if self.deep_supervision and self.training:
             return outputs
         return outputs[-1]
+
+
+class UNetPlusPlusLarge5ch(UNetPlusPlus5ch):
+    """U-Net++ variant with the original large channel schedule."""
+
+    def __init__(
+        self,
+        in_channels: int = 5,
+        out_channels: int = 3,
+        deep_supervision: bool = True,
+    ):
+        super().__init__(
+            in_channels=in_channels,
+            out_channels=out_channels,
+            features=(64, 128, 256, 512),
+            deep_supervision=deep_supervision,
+        )

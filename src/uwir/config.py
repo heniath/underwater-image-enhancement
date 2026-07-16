@@ -281,7 +281,7 @@ def option():
         help=(
             "Model variant (backbone_channels):\n"
             "  Channels: 3ch=RGB only | 4ch_t=RGB+t(x) | 4ch_b=RGB+B | 5ch=RGB+t(x)+B\n"
-            "  Backbones: unet | unetpp | asppunet | mambabottleneck | mambaaspp | "
+            "  Backbones: unet | unetpp | unetpp_large | asppunet | mambabottleneck | mambaaspp | "
             "resnet (ResNet-50) | mobilenet (MobileNetV3-Large) | "
             "mambavision (MambaVision-T, hybrid Mamba+Transformer, NVIDIA 2024) | "
             "mambaunet (native Mamba U-Net, VSS blocks throughout, ~29M params)"
@@ -301,6 +301,7 @@ def option():
         choices=[
             "unet",
             "unetpp",
+            "unetpp_large",
             "asppunet",
             "mambabottleneck",
             "mambaaspp",

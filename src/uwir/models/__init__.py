@@ -18,6 +18,7 @@ __all__ = [
     "DenseASPPFusionUNet",
     "ModelSpec",
     "ResNetUNet",
+    "UNetPlusPlusLarge5ch",
     "UNetPlusPlus5ch",
     "UNet5ch",
     "build_model",
@@ -39,6 +40,7 @@ _ARCHITECTURES = {
     "ASPPFusionUNet": ("fusion_unet", "ASPPFusionUNet"),
     "DenseASPPFusionUNet": ("fusion_unet", "DenseASPPFusionUNet"),
     "ResNetUNet": ("resnet_unet", "ResNetUNet"),
+    "UNetPlusPlusLarge5ch": ("unetpp", "UNetPlusPlusLarge5ch"),
     "UNetPlusPlus5ch": ("unetpp", "UNetPlusPlus5ch"),
     "UNet5ch": ("unet", "UNet5ch"),
 }

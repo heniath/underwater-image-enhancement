@@ -9,6 +9,7 @@ from uwir.models import (
     MBConvUNet,
     MobileNetUNet,
     ResNetUNet,
+    UNetPlusPlusLarge5ch,
     UNetPlusPlus5ch,
     UNet5ch,
     build_model,
@@ -26,6 +27,7 @@ from uwir.physics import (
 __all__ = [
     "UNet5ch",
     "ResNetUNet",
+    "UNetPlusPlusLarge5ch",
     "UNetPlusPlus5ch",
     "MobileNetUNet",
     "MambaVisionUNet",
