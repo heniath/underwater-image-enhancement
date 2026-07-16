@@ -291,18 +291,24 @@ def _criterion_with_deep_supervision(criterion, pred, gt):
 
     losses = []
     part_sums = {}
-    for output in pred:
+    base_weights = (0.1, 0.2, 0.4, 1.0)
+    if len(pred) <= len(base_weights):
+        weights = base_weights[-len(pred) :]
+    else:
+        weights = (base_weights[0],) * (len(pred) - len(base_weights)) + base_weights
+
+    for output, weight in zip(pred, weights):
         loss, parts = criterion(output, gt)
-        losses.append(loss)
+        losses.append(loss * weight)
         for key, value in parts.items():
-            part_sums[key] = part_sums.get(key, 0.0) + value
+            part_sums[key] = part_sums.get(key, 0.0) + (value * weight)
 
     if not losses:
         raise ValueError("Model returned an empty prediction list.")
 
-    total = torch.stack(losses).mean()
-    count = len(losses)
-    avg_parts = {key: value / count for key, value in part_sums.items()}
+    weight_sum = float(sum(weights))
+    total = torch.stack(losses).sum() / weight_sum
+    avg_parts = {key: value / weight_sum for key, value in part_sums.items()}
     avg_parts["total"] = total.item()
     return total, avg_parts
 

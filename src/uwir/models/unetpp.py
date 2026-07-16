@@ -14,7 +14,7 @@ class UNetPlusPlus5ch(nn.Module):
         self,
         in_channels: int = 5,
         out_channels: int = 3,
-        features: tuple[int, ...] = (64, 128, 256, 512),
+        features: tuple[int, ...] = (64, 128, 192, 256),
         deep_supervision: bool = True,
     ):
         super().__init__()
