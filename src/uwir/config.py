@@ -282,7 +282,7 @@ def option():
             "Model variant (backbone_channels):\n"
             "  Channels: 3ch=RGB only | 4ch_t=RGB+t(x) | 4ch_b=RGB+B | 5ch=RGB+t(x)+B\n"
             "  Backbones: unet | unetpp | unetpp_large | asppunet | mambabottleneck | mambaaspp | "
-            "resnet (ResNet-50) | mobilenet (MobileNetV3-Large) | "
+            "resnet (ResNet-50) | mobilenet (MobileNetV3-Large) | mbconv_unetpp_defined | "
             "mambavision (MambaVision-T, hybrid Mamba+Transformer, NVIDIA 2024) | "
             "mambaunet (native Mamba U-Net, VSS blocks throughout, ~29M params)"
         ),
@@ -307,6 +307,7 @@ def option():
             "mambaaspp",
             "resnet",
             "mobilenet",
+            "mbconv_unetpp_defined",
             "mambavision",
             "mambaunet",
         ],
