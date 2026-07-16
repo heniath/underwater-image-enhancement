@@ -23,8 +23,12 @@ VAL_FOLDER="${VAL_FOLDER:-${PROJECT_DIR}/results/ablation_multi}"
 PRIOR="${PRIOR:-udcp}"
 N_EPOCHS="${N_EPOCHS:-50}"
 BATCH_SIZE="${BATCH_SIZE:-16}"
-NUM_RUNS="${NUM_RUNS:-5}"
-SEEDS="${SEEDS:-0 1 2 3 4}"
+NUM_RUNS="${NUM_RUNS:-3}"
+SEEDS="${SEEDS:-0 1 2}"
+CROP_SIZE="${CROP_SIZE:-256}"
+L1_WEIGHT="${L1_WEIGHT:-1.0}"
+PERCEPTUAL_WEIGHT="${PERCEPTUAL_WEIGHT:-1.0}"
+SSIM_WEIGHT="${SSIM_WEIGHT:-0.0}"
 
 # Derived paths
 mkdir -p "${PROJECT_DIR}/logs"
@@ -75,6 +79,10 @@ python ablation_train_multi_run.py \\
     --prior_method    "${PRIOR}" \\
     --nEpochs         "${N_EPOCHS}" \\
     --batchSize       "${BATCH_SIZE}" \\
+    --cropSize        "${CROP_SIZE}" \\
+    --L1_weight       "${L1_WEIGHT}" \\
+    --perceptual_weight "${PERCEPTUAL_WEIGHT}" \\
+    --SSIM_weight     "${SSIM_WEIGHT}" \\
     --num_runs        "${NUM_RUNS}" \\
     --seeds ${SEEDS} \\
     2>&1 | tee "\${LOGFILE}"

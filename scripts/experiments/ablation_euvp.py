@@ -1,8 +1,8 @@
 """
 ablation_train_multi_run.py
 ===========================
-Train the 4 UNet ablation variants (3ch, 4ch_t, 4ch_b, 5ch) from scratch
-N times (default 5) using different random seeds, then evaluate every
+Train matched U-Net and UW-LYT variants (3ch, 4ch_t, 4ch_b, 5ch) from scratch
+N times (default 3) using different random seeds, then evaluate every
 resulting checkpoint and report mean ± std across seeds.
 
 Each seed controls:
@@ -12,7 +12,7 @@ Each seed controls:
 
 Usage
 -----
-    # Default: 4 variants × 5 seeds, 50 epochs, EUVP dataset, UDCP prior
+    # Default: matched U-Net/UW-LYT variants × 3 seeds, 50 epochs, EUVP, UDCP
     python ablation_train_multi_run.py
 
     # Custom:
@@ -23,8 +23,8 @@ Usage
         --prior_method    udcp \\
         --nEpochs         50 \\
         --batchSize       16 \\
-        --num_runs        5 \\
-        --seeds 0 1 2 3 4
+        --num_runs        3 \\
+        --seeds 0 1 2
 
 Output
 ------
@@ -75,9 +75,13 @@ from uwir.cli.evaluate import collect_test_pairs, TestDataset
 
 
 # ---------------------------------------------------------------------------
-# The 4 UNet ablation variants
+# Matched legacy U-Net and UW-LYT ablation variants
 # ---------------------------------------------------------------------------
-ABLATION_VARIANTS = ["unet_3ch", "unet_4ch_t", "unet_4ch_b", "unet_5ch"]
+ABLATION_VARIANTS = [
+    "unet_3ch", "unet_4ch_t", "unet_4ch_b", "unet_5ch",
+    "uwlyt_3ch", "uwlyt_4ch_t", "uwlyt_4ch_b", "uwlyt_5ch",
+]
+LEGACY_BASELINE = {"model": "unet_3ch", "psnr": 20.896, "ssim": 0.8857}
 
 # Metrics to aggregate
 METRIC_KEYS = ("psnr", "ssim", "ciede2000", "uciqe", "uiqm", "inference_ms_per_img")
@@ -137,7 +141,7 @@ def _make_parser() -> argparse.ArgumentParser:
     p.add_argument("--SSIM_weight", type=float, default=0.0)
 
     # Multi-run
-    p.add_argument("--num_runs", type=int, default=5,
+    p.add_argument("--num_runs", type=int, default=3,
                    help="Number of independent training runs (one per seed).")
     p.add_argument("--seeds", type=int, nargs="+", default=None,
                    help="Explicit seed list (length must equal --num_runs if given).")
@@ -345,7 +349,14 @@ def eval_checkpoint(
     ckpt_epoch, ckpt_metrics = load_ckpt(best_path, model, device=str(device))
     model.eval()
 
-    collate_fn = lambda b: _collate_val(b, physics_mode, physics_extractor)
+    prior_time_ms = [0.0]
+
+    def collate_fn(batch):
+        started = time.perf_counter()
+        collated = _collate_val(batch, physics_mode, physics_extractor)
+        prior_time_ms[0] += (time.perf_counter() - started) * 1000.0
+        return collated
+
     loader = data.DataLoader(
         test_ds, batch_size=batch_size, shuffle=False,
         num_workers=threads, pin_memory=(device.type == "cuda"),
@@ -353,6 +364,10 @@ def eval_checkpoint(
     )
 
     metrics, n = evaluate_loader(model, loader, device)
+    if physics_mode != "none" and n:
+        metrics["model_inference_ms_per_img"] = metrics["inference_ms_per_img"]
+        metrics["prior_generation_ms_per_img"] = prior_time_ms[0] / n
+        metrics["inference_ms_per_img"] += metrics["prior_generation_ms_per_img"]
     metrics["best_epoch"]    = ckpt_epoch
     metrics["n_images"]      = n
     metrics["val_psnr_ckpt"] = ckpt_metrics.get("psnr")
@@ -567,7 +582,20 @@ def main():
             }
             for variant in args.variants
         },
+        "legacy_baseline": LEGACY_BASELINE,
+        "acceptance": {
+            "model": "uwlyt_3ch",
+            "max_psnr_drop_db": 0.5,
+            "max_ssim_drop": 0.01,
+            "psnr_pass": all_agg.get("uwlyt_3ch", {}).get("psnr_mean", -1e9)
+            >= LEGACY_BASELINE["psnr"] - 0.5,
+            "ssim_pass": all_agg.get("uwlyt_3ch", {}).get("ssim_mean", -1e9)
+            >= LEGACY_BASELINE["ssim"] - 0.01,
+        },
     }
+    output["acceptance"]["accepted"] = (
+        output["acceptance"]["psnr_pass"] and output["acceptance"]["ssim_pass"]
+    )
     with open(out_path, "w") as f:
         json.dump(output, f, indent=2)
 

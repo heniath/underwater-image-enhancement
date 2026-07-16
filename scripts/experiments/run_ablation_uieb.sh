@@ -3,7 +3,7 @@
 # run_ablation_uieb.sh
 # Run ablation_train_multi_run_uieb.py inside a persistent tmux session.
 #
-# 4 variants x 2 priors (UDCP + GUPDM) x 3 seeds  =  24 training runs
+# 8 variants x 2 priors (UDCP + GUPDM) x 3 seeds  =  48 training runs
 # Dataset: UIEB  (800 train/val  |  90 test)
 #
 # Usage:
@@ -24,6 +24,10 @@ N_EPOCHS="${N_EPOCHS:-50}"
 BATCH_SIZE="${BATCH_SIZE:-16}"
 NUM_RUNS="${NUM_RUNS:-3}"
 SEEDS="${SEEDS:-0 1 2}"
+CROP_SIZE="${CROP_SIZE:-256}"
+L1_WEIGHT="${L1_WEIGHT:-1.0}"
+PERCEPTUAL_WEIGHT="${PERCEPTUAL_WEIGHT:-1.0}"
+SSIM_WEIGHT="${SSIM_WEIGHT:-0.0}"
 
 # ---- Derived paths -------------------------------------------------------
 mkdir -p "${PROJECT_DIR}/logs"
@@ -70,6 +74,10 @@ python ablation_train_multi_run_uieb.py \
     --prior_methods  ${PRIOR_METHODS} \
     --nEpochs        "${N_EPOCHS}" \
     --batchSize      "${BATCH_SIZE}" \
+    --cropSize       "${CROP_SIZE}" \
+    --L1_weight      "${L1_WEIGHT}" \
+    --perceptual_weight "${PERCEPTUAL_WEIGHT}" \
+    --SSIM_weight    "${SSIM_WEIGHT}" \
     --num_runs       "${NUM_RUNS}" \
     --seeds          ${SEEDS} \
     2>&1 | tee "\${LOGFILE}"
@@ -94,10 +102,10 @@ tmux new-session -d -s "${SESSION}" bash "${INNER_SCRIPT}"
 
 echo "[run_ablation_uieb] Session '${SESSION}' started."
 echo ""
-echo "  Variants       : 4 (unet_3ch, unet_4ch_t, unet_4ch_b, unet_5ch)"
+echo "  Variants       : 8 (matched unet_* and uwlyt_* channel variants)"
 echo "  Priors         : ${PRIOR_METHODS}"
 echo "  Seeds          : ${SEEDS}  =>  $(($(echo ${SEEDS} | wc -w))) runs/combo"
-echo "  Total runs     : 24"
+echo "  Total runs     : $(($(echo ${SEEDS} | wc -w) * $(echo ${PRIOR_METHODS} | wc -w) * 8))"
 echo ""
 echo "  Attach (watch live)   : tmux attach -t ${SESSION}"
 echo "  Detach (keep running) : Ctrl+B then D"

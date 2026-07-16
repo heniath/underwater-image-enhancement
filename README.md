@@ -2,10 +2,11 @@
 
 U-Net trained with physics-guided input channels (UDCP transmission map + background light) on the EUVP benchmark.
 
-Two model families are provided:
+Three model families are provided:
 
 - **Deterministic U-Net** (`train.py`) — the standard 4-level U-Net (`unet_*` and the ResNet / MobileNet / Mamba backbones).
 - **PUIE-UNet** (`PUIE-Unet.py`) — a **probabilistic** variant that grafts PUIE-Net's conditional-VAE mechanism (prior/posterior latent encoders + KL divergence, trained with an ELBO) onto the same deeper U-Net backbone. At inference it can run deterministically (MC) or average several prior samples (MP) for an ensembling boost.
+- **UW-LYT** (`uwlyt_*`, `uwlyttiny_*`) — a 30–32k parameter YCbCr model (12–13k for Tiny) with separate luminance/chrominance paths and legacy-compatible physics variants. See the [design, protocol, and literature review](docs/uwlyt_literature_review.md).
 
 ---
 

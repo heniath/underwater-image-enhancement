@@ -23,6 +23,7 @@ and                      results/net_benchmark_<YYYYMMDD_HHMMSS>.csv  (summary t
 import argparse
 import csv
 import os
+import resource
 import sys
 import time
 import traceback
@@ -79,8 +80,12 @@ def _results_dir(output_dir: str) -> str:
     return path
 
 
-def _get_device() -> torch.device:
-    if torch.cuda.is_available():
+def _get_device(requested: str = "auto") -> torch.device:
+    if requested == "cpu":
+        return torch.device("cpu")
+    if requested == "cuda" and not torch.cuda.is_available():
+        raise RuntimeError("--device cuda requested, but CUDA is not available")
+    if requested == "cuda" or torch.cuda.is_available():
         return torch.device("cuda")
     print("[INFO] CUDA not available – running on CPU (results will be slow).\n")
     return torch.device("cpu")
@@ -94,6 +99,7 @@ def benchmark_model(
     img_size: int = 256,
     warmup_runs: int = 1,
     timed_runs: int = 3,
+    prior_method: str = "udcp",
 ) -> dict | None:
     """
     Build, warm-up and time a single model.
@@ -119,13 +125,29 @@ def benchmark_model(
         return None
 
     model = model.to(device).eval()
-    dummy = torch.rand(1, in_channels, img_size, img_size, device=device)
+    rgb = torch.rand(1, 3, img_size, img_size)
+    physics_extractor = None
+    if physics_mode != "none":
+        from uwir.cli.train import _resolve_physics_extractor
+
+        physics_extractor = _resolve_physics_extractor(prior_method)
+
+    def make_input() -> torch.Tensor:
+        """Build model input, including legacy prior generation when required."""
+        if physics_mode == "none":
+            return rgb.to(device)
+        from uwir.cli.train import _add_physics_channels
+
+        augmented = _add_physics_channels(rgb[0], physics_mode, physics_extractor)
+        return augmented.unsqueeze(0).to(device)
+
+    dummy = make_input()
 
     # ---- warm-up -----------------------------------------------------------
     try:
         with torch.no_grad():
             for _ in range(warmup_runs):
-                _ = model(dummy)
+                _ = model(make_input())
         if device.type == "cuda":
             torch.cuda.synchronize()
     except Exception as exc:
@@ -135,13 +157,20 @@ def benchmark_model(
     # ---- timed runs --------------------------------------------------------
     if device.type == "cuda":
         torch.cuda.synchronize()
+    if device.type == "cuda":
+        torch.cuda.reset_peak_memory_stats(device)
     t_start = time.perf_counter()
     with torch.no_grad():
         for _ in range(timed_runs):
-            _ = model(dummy)
+            _ = model(make_input())
     if device.type == "cuda":
         torch.cuda.synchronize()
     elapsed_ms = (time.perf_counter() - t_start) / timed_runs * 1e3
+    if device.type == "cuda":
+        peak_memory_mb = torch.cuda.max_memory_allocated(device) / 2**20
+    else:
+        # ru_maxrss is KiB on Linux and captures tensor allocations missed by tracemalloc.
+        peak_memory_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
 
     # ---- stats -------------------------------------------------------------
     n_params = sum(p.numel() for p in model.parameters())
@@ -165,6 +194,7 @@ def benchmark_model(
     print(f"  Channels: {in_channels}")
     print(f"  Params  : {params_m:.3f} M")
     print(f"  FLOPs   : {flops_str}")
+    print(f"  Peak mem: {peak_memory_mb:.2f} MiB")
     print(
         f"  Time    : {elapsed_ms:.2f} ms  "
         f"(avg over {timed_runs} run{'s' if timed_runs > 1 else ''}, no grad)"
@@ -177,7 +207,10 @@ def benchmark_model(
         "in_channels": in_channels,
         "params_M": round(params_m, 3),
         "flops_G": round(flops_g, 3) if flops_g is not None else "N/A",
+        "peak_memory_MiB": round(peak_memory_mb, 2),
         "time_ms": round(elapsed_ms, 2),
+        "memory_scope": "CUDA allocated" if device.type == "cuda" else "process peak RSS",
+        "latency_scope": f"{prior_method}+model" if physics_mode != "none" else "model",
     }
 
 
@@ -213,6 +246,12 @@ def parse_args(argv=None):
         "Leave empty to test all models.",
     )
     parser.add_argument(
+        "--device",
+        choices=("auto", "cpu", "cuda"),
+        default="auto",
+        help="Profiling device; select cpu and cuda in separate matched runs.",
+    )
+    parser.add_argument(
         "--no-pretrained",
         dest="pretrained",
         action="store_false",
@@ -232,6 +271,12 @@ def parse_args(argv=None):
         default=3,
         metavar="N",
         help="Number of timed forward passes to average (default: 3).",
+    )
+    parser.add_argument(
+        "--prior-method",
+        choices=("udcp", "gdcp", "gupdm"),
+        default="udcp",
+        help="Prior included in end-to-end physics-variant latency.",
     )
     parser.add_argument(
         "--output-dir",
@@ -270,7 +315,7 @@ def main(argv=None):
     else:
         selected = list(ALL_MODEL_NAMES)
 
-    device = _get_device()
+    device = _get_device(args.device)
 
     # ---- set up output files -----------------------------------------------
     rdir = _results_dir(args.output_dir)
@@ -301,6 +346,7 @@ def main(argv=None):
                 device=device,
                 img_size=args.img_size,
                 timed_runs=args.runs,
+                prior_method=args.prior_method,
             )
             if result is not None:
                 rows.append(result)
@@ -312,7 +358,10 @@ def main(argv=None):
         print(f"  Summary: {len(rows)} passed, {skipped} skipped")
         print(f"{'=' * 65}")
         if rows:
-            hdr = f"{'Model':<22} {'Ch':>3}  {'Params(M)':>10}  {'FLOPs(G)':>10}  {'Time(ms)':>10}"
+            hdr = (
+                f"{'Model':<22} {'Ch':>3}  {'Params(M)':>10}  {'FLOPs(G)':>10}  "
+                f"{'Peak(MiB)':>10}  {'Time(ms)':>10}  {'Scope':>12}"
+            )
             print(f"\n{hdr}")
             print("-" * len(hdr))
             for r in rows:
@@ -321,7 +370,9 @@ def main(argv=None):
                 )
                 print(
                     f"  {r['model']:<20} {r['in_channels']:>3}  "
-                    f"{r['params_M']:>10.3f}  {flops_disp:>10}  {r['time_ms']:>10.2f}"
+                    f"{r['params_M']:>10.3f}  {flops_disp:>10}  "
+                    f"{r['peak_memory_MiB']:>10.2f}  {r['time_ms']:>10.2f}  "
+                    f"{r['latency_scope']:>12}"
                 )
         print()
 

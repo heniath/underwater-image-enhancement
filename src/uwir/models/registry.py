@@ -19,7 +19,7 @@ Naming convention
     <backbone>_<variant>
 
    backbone : unet | asppunet | mambabottleneck | mambaaspp | resnet |
-              mobilenet | mambavision | mambaunet
+              mobilenet | mambavision | mambaunet | uwlyt | uwlyttiny
   variant  : 3ch | 4ch_t | 4ch_b | 5ch
 
 Physics modes
@@ -47,6 +47,8 @@ _BACKBONES = (
     "mobilenet",
     "mambavision",
     "mambaunet",
+    "uwlyt",
+    "uwlyttiny",
 )
 
 _FUSION_BACKBONES = ("fusionunet", "asppfusion", "denseasppfusion")
@@ -209,6 +211,11 @@ def build_model(name: str, pretrained_backbone: bool = True) -> nn.Module:
         from .mamba_unet import MambaUNet
 
         return MambaUNet(in_channels=in_channels)
+
+    if backbone in {"uwlyt", "uwlyttiny"}:
+        from .uwlyt import build_uwlyt
+
+        return build_uwlyt(in_channels, tiny=backbone == "uwlyttiny")
 
     # Should never reach here due to parse_model_variant guard
     raise ValueError(f"Unknown backbone: {backbone}")

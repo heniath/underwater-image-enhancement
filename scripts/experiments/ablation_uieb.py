@@ -1,7 +1,7 @@
 """
 ablation_train_multi_run_uieb.py
 =================================
-Train the 4 UNet ablation variants (3ch, 4ch_t, 4ch_b, 5ch) from scratch
+Train matched U-Net and UW-LYT variants (3ch, 4ch_t, 4ch_b, 5ch) from scratch
 on the UIEB dataset using both UDCP and GUPDM physics priors.
 
 Dataset split (fixed, sorted order):
@@ -11,12 +11,12 @@ Dataset split (fixed, sorted order):
 Within each run the 10 % hold-out validation set is carved out of the
 800-image pool per-seed via random_split.
 
-Total runs: 4 variants x 2 priors x N seeds
-  Default:  4 x 2 x 3 = 24 runs
+Total runs: 8 variants x 2 priors x N seeds
+  Default:  8 x 2 x 3 = 48 runs
 
 Usage
 -----
-    # Default: 4 variants x 2 priors x 3 seeds, 50 epochs
+    # Default: 8 variants x 2 priors x 3 seeds, 50 epochs
     python ablation_train_multi_run_uieb.py
 
     # Custom seeds / epochs:
@@ -81,7 +81,11 @@ from uwir.cli.train import (
 # Constants
 # ---------------------------------------------------------------------------
 
-ABLATION_VARIANTS = ["unet_3ch", "unet_4ch_t", "unet_4ch_b", "unet_5ch"]
+ABLATION_VARIANTS = [
+    "unet_3ch", "unet_4ch_t", "unet_4ch_b", "unet_5ch",
+    "uwlyt_3ch", "uwlyt_4ch_t", "uwlyt_4ch_b", "uwlyt_5ch",
+]
+LEGACY_BASELINE = {"model": "unet_3ch", "psnr": 21.017, "ssim": 0.8871}
 METRIC_KEYS       = ("psnr", "ssim", "ciede2000", "uciqe", "uiqm",
                      "inference_ms_per_img")
 
@@ -120,7 +124,7 @@ def _make_parser() -> argparse.ArgumentParser:
         description=(
             "Multi-seed UIEB ablation: train 4 UNet variants with "
             "UDCP & GUPDM priors, N seeds each. "
-            "Default: 4 variants x 2 priors x 3 seeds = 24 runs."
+            "Default: 8 variants x 2 priors x 3 seeds = 48 runs."
         ),
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
@@ -176,7 +180,7 @@ def _make_parser() -> argparse.ArgumentParser:
         "--num_runs", type=int, default=3,
         help=(
             "Number of independent seeds per (variant, prior) pair. "
-            "Default 3 -> 4 variants x 2 priors x 3 seeds = 24 runs."
+            "Default 3 -> 8 variants x 2 priors x 3 seeds = 48 runs."
         ),
     )
     p.add_argument(
@@ -406,7 +410,14 @@ def eval_checkpoint(
     ckpt_epoch, ckpt_metrics = load_ckpt(best_path, model, device=str(device))
     model.eval()
 
-    collate_fn = lambda b: _collate_val(b, physics_mode, physics_extractor)
+    prior_time_ms = [0.0]
+
+    def collate_fn(batch):
+        started = time.perf_counter()
+        collated = _collate_val(batch, physics_mode, physics_extractor)
+        prior_time_ms[0] += (time.perf_counter() - started) * 1000.0
+        return collated
+
     loader = data.DataLoader(
         test_ds, batch_size=batch_size, shuffle=False,
         num_workers=threads, pin_memory=(device.type == "cuda"),
@@ -414,6 +425,10 @@ def eval_checkpoint(
     )
 
     metrics, n = evaluate_loader(model, loader, device)
+    if physics_mode != "none" and n:
+        metrics["model_inference_ms_per_img"] = metrics["inference_ms_per_img"]
+        metrics["prior_generation_ms_per_img"] = prior_time_ms[0] / n
+        metrics["inference_ms_per_img"] += metrics["prior_generation_ms_per_img"]
     metrics["best_epoch"]    = ckpt_epoch
     metrics["n_images"]      = n
     metrics["val_psnr_ckpt"] = ckpt_metrics.get("psnr")
@@ -712,7 +727,24 @@ def main():
             for prior   in args.prior_methods
             for variant in args.variants
         },
+        "legacy_baseline": LEGACY_BASELINE,
+        "acceptance": {
+            prior: {
+                "model": "uwlyt_3ch",
+                "max_psnr_drop_db": 0.5,
+                "max_ssim_drop": 0.01,
+                "psnr_pass": all_agg.get(f"uwlyt_3ch@{prior}", {}).get(
+                    "psnr_mean", -1e9
+                ) >= LEGACY_BASELINE["psnr"] - 0.5,
+                "ssim_pass": all_agg.get(f"uwlyt_3ch@{prior}", {}).get(
+                    "ssim_mean", -1e9
+                ) >= LEGACY_BASELINE["ssim"] - 0.01,
+            }
+            for prior in args.prior_methods
+        },
     }
+    for decision in output["acceptance"].values():
+        decision["accepted"] = decision["psnr_pass"] and decision["ssim_pass"]
     with open(out_path, "w") as f:
         json.dump(output, f, indent=2)
 
