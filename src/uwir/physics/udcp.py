@@ -175,7 +175,21 @@ def compute_physics_maps(
         b_t = torch.from_numpy(b_map).unsqueeze(0)  # (1, H, W)
         inp_5ch = torch.cat([rgb_tensor, t_t, b_t], dim=0)  # (5, H, W)
     """
-    B = estimate_background_light(image_np)
-    t_map = estimate_transmission_udcp(image_np, B)
-    b_map = np.full(t_map.shape, float(np.mean(B)), dtype=np.float32)
+    t_map, background_rgb = compute_physics_maps_rgb(image_np)
+    b_map = np.full(t_map.shape, float(np.mean(background_rgb)), dtype=np.float32)
     return t_map, b_map
+
+
+def compute_physics_maps_rgb(
+    image_np: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return scalar transmission and the unmodified three-value RGB background light.
+
+    This API complements :func:`compute_physics_maps`; the legacy function
+    deliberately continues returning a spatial scalar-B map.
+    """
+    if image_np.ndim != 3 or image_np.shape[2] != 3:
+        raise ValueError(f"expected an HWC RGB image, got shape {image_np.shape}")
+    background_rgb = estimate_background_light(image_np)
+    transmission = estimate_transmission_udcp(image_np, background_rgb)
+    return transmission, background_rgb

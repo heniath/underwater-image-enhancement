@@ -84,6 +84,7 @@ from uwir.cli.train import (
 ABLATION_VARIANTS = [
     "unet_3ch", "unet_4ch_t", "unet_4ch_b", "unet_5ch",
     "uwlyt_3ch", "uwlyt_4ch_t", "uwlyt_4ch_b", "uwlyt_5ch",
+    "uwlytv2_3ch", "uwlytv2_4ch_t", "uwlytv2_6ch_b", "uwlytv2_7ch",
 ]
 LEGACY_BASELINE = {"model": "unet_3ch", "psnr": 21.017, "ssim": 0.8871}
 METRIC_KEYS       = ("psnr", "ssim", "ciede2000", "uciqe", "uiqm",

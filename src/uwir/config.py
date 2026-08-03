@@ -184,7 +184,8 @@ def option():
         help=(
             "Model variant (backbone_channels):\n"
             "  Channels: 3ch=RGB only | 4ch_t=RGB+t(x) | 4ch_b=RGB+B | 5ch=RGB+t(x)+B\n"
-            "  Backbones: unet (paper) | uwlyt | uwlyttiny (retained experiments)"
+            "  V2: 6ch_b=RGB+B_RGB | 7ch=RGB+t(x)+B_RGB\n"
+            "  Backbones: unet | uwlyt | uwlyttiny | uwlytv2 | uwlytv2tiny"
         ),
     )
     parser.add_argument(
