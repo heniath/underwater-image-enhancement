@@ -1,11 +1,5 @@
-"""Datasets and data-loader factories with lazy dataset imports."""
+"""UIEB and EUVP data loading."""
 
-__all__ = ["EUVPDataset", "U45Dataset", "UFO120Dataset", "UIEBDataset"]
+from .datasets import EUVPDataset, UIEBDataset
 
-
-def __getattr__(name):
-    if name in __all__:
-        from . import datasets
-
-        return getattr(datasets, name)
-    raise AttributeError(name)
+__all__ = ["EUVPDataset", "UIEBDataset"]

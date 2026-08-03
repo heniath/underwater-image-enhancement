@@ -1,8 +1,4 @@
-"""
-Underwater Image Restoration — Dataset Loaders
-Covers: UIEB, EUVP, UFO-120 (paired, with ground truth)
-        U45  (unpaired / no-reference, eval only)
-"""
+"""Paired UIEB and EUVP datasets used by the paper."""
 
 import os
 import random
@@ -104,7 +100,6 @@ class UIEBDataset(data.Dataset):
 
     def __len__(self):
         return len(self.input_files)
-
 
 # ---------------------------------------------------------------------------
 # Shared augmentation helper (coordinated on paired PIL images)
@@ -261,132 +256,6 @@ class EUVPDataset(data.Dataset):
             img_gt = self.transform(img_gt)
 
         return img_in, img_gt, file_in, file_gt
-
-    def __len__(self):
-        return len(self.input_files)
-
-
-# ---------------------------------------------------------------------------
-# UFO-120  (high-resolution AUV pairs, 1500 train / 120 test)
-# Expected layout:
-#   <data_dir>/train_val/lrd/   ← low-resolution / degraded inputs
-#   <data_dir>/train_val/hr/    ← high-quality references
-#   <data_dir>/test/lrd/
-#   <data_dir>/test/hr/
-# ---------------------------------------------------------------------------
-
-
-class UFO120Dataset(data.Dataset):
-    """
-    UFO-120 high-resolution paired dataset.
-
-    Args:
-        data_dir (str): Root UFO-120 directory.
-        split    (str): 'train' or 'test'.
-        transform: Applied to both input and GT images.
-        augment (bool): Apply random augmentation to both images. Default: False.
-    """
-
-    SPLIT_MAP = {
-        "train": ("train_val/lrd", "train_val/hr"),
-        "test": ("test/lrd", "test/hr"),
-    }
-
-    def __init__(
-        self, data_dir, split="train", transform=None, augment=False, in_memory=False, img_size=None
-    ):
-        super().__init__()
-
-        assert split in self.SPLIT_MAP, f"split must be 'train' or 'test', got '{split}'"
-
-        input_subdir, gt_subdir = self.SPLIT_MAP[split]
-        input_dir = join(data_dir, input_subdir)
-        gt_dir = join(data_dir, gt_subdir)
-
-        self.transform = transform
-        self.augment = augment
-        self.in_memory = in_memory
-        self.img_size = img_size
-
-        # Stem-name matching
-        gt_dict = {
-            os.path.splitext(f)[0]: join(gt_dir, f) for f in listdir(gt_dir) if is_image_file(f)
-        }
-        self.input_files = []
-        self.gt_files = []
-        for f in sorted(listdir(input_dir)):
-            if not is_image_file(f):
-                continue
-            stem = os.path.splitext(f)[0]
-            if stem in gt_dict:
-                self.input_files.append(join(input_dir, f))
-                self.gt_files.append(gt_dict[stem])
-
-        if self.in_memory:
-            print("Loading UFO-120 dataset into memory...")
-            self.input_images = [load_img(f) for f in tqdm(self.input_files, desc="UFO-120 Inputs")]
-            self.gt_images = [load_img(f) for f in tqdm(self.gt_files, desc="UFO-120 GTs")]
-
-    def __getitem__(self, index):
-        if self.in_memory:
-            img_in = self.input_images[index]
-            img_gt = self.gt_images[index]
-        else:
-            img_in = load_img(self.input_files[index])
-            img_gt = load_img(self.gt_files[index])
-        _, file_in = os.path.split(self.input_files[index])
-        _, file_gt = os.path.split(self.gt_files[index])
-
-        if self.img_size:
-            img_in, img_gt = _paired_resize_crop(img_in, img_gt, self.img_size, self.augment)
-
-        if self.augment:
-            img_in, img_gt = _paired_augment(img_in, img_gt)
-
-        if self.transform:
-            img_in = self.transform(img_in)
-            img_gt = self.transform(img_gt)
-
-        return img_in, img_gt, file_in, file_gt
-
-    def __len__(self):
-        return len(self.input_files)
-
-
-# ---------------------------------------------------------------------------
-# U45  (45 challenging real-world images, NO ground truth)
-# Used only for no-reference metric evaluation (UCIQE, UIQM).
-# Expected layout:  <data_dir>/*.jpg  (flat folder of degraded images)
-# ---------------------------------------------------------------------------
-
-
-class U45Dataset(data.Dataset):
-    """
-    Unpaired U45 dataset for no-reference evaluation only.
-
-    Args:
-        data_dir (str): Flat directory containing the 45 underwater images.
-        transform: Applied to input images only.
-    """
-
-    def __init__(self, data_dir, transform=None, in_memory=False):
-        super().__init__()
-        self.transform = transform
-        self.in_memory = in_memory
-        self.input_files = sorted(join(data_dir, f) for f in listdir(data_dir) if is_image_file(f))
-
-        if self.in_memory:
-            print("Loading U45 dataset into memory...")
-            self.input_images = [load_img(f) for f in tqdm(self.input_files, desc="U45 Inputs")]
-
-    def __getitem__(self, index):
-        img_in = self.input_images[index] if self.in_memory else load_img(self.input_files[index])
-        _, file_in = os.path.split(self.input_files[index])
-
-        if self.transform:
-            img_in = self.transform(img_in)
-
-        return img_in, file_in
 
     def __len__(self):
         return len(self.input_files)

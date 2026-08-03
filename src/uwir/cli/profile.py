@@ -1,17 +1,14 @@
 """
 net_test.py
 -----------
-Benchmark every registered model architecture × channel variant.
+Benchmark the paper U-Net and retained UW-LYT channel variants.
 
 Usage
 -----
-    python net_test.py                      # test all models
-    python net_test.py resnet mambaunet     # test only models whose name
-                                            # contains one of the given tokens
-    python net_test.py --no-pretrained      # skip pretrained-backbone loading
+    uwir-profile                 # test all models
+    uwir-profile unet uwlyt      # filter registered models
 
-The script gracefully skips any model that cannot be instantiated (e.g. missing
-optional dependencies such as mamba_ssm or a pretrained checkpoint) so that the
+The script gracefully skips a model if it cannot be instantiated so the
 remaining models are still reported.
 
 Output files
@@ -274,7 +271,7 @@ def parse_args(argv=None):
     )
     parser.add_argument(
         "--prior-method",
-        choices=("udcp", "gdcp", "gupdm"),
+        choices=("udcp",),
         default="udcp",
         help="Prior included in end-to-end physics-variant latency.",
     )

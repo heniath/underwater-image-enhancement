@@ -23,13 +23,6 @@ import cv2
 import numpy as np
 from scipy.ndimage import minimum_filter
 
-from .features import (
-    PhysicsConfig,
-    PhysicsFeatures,
-    scaled_odd_window,
-    scaled_spatial_parameter,
-)
-
 # ---------------------------------------------------------------------------
 # Background Light Estimation
 # ---------------------------------------------------------------------------
@@ -186,75 +179,3 @@ def compute_physics_maps(
     t_map = estimate_transmission_udcp(image_np, B)
     b_map = np.full(t_map.shape, float(np.mean(B)), dtype=np.float32)
     return t_map, b_map
-
-
-def estimate_background_light_robust(
-    image_np: np.ndarray,
-    config: PhysicsConfig | None = None,
-) -> np.ndarray:
-    """Estimate RGB background light using robust aggregation of UDCP candidates."""
-    config = config or PhysicsConfig()
-    image = np.asarray(image_np, dtype=np.float32)
-    if image.ndim != 3 or image.shape[2] != 3:
-        raise ValueError(f"Expected image shape (H, W, 3), got {image.shape}")
-    if image.size and image.max() > 1.0:
-        image = image / 255.0
-    image = np.clip(image, 0.0, 1.0)
-
-    dark_gb = np.min(image[:, :, 1:], axis=2).reshape(-1)
-    requested = int(dark_gb.size * config.background_percentile / 100.0)
-    count = min(dark_gb.size, max(config.min_background_candidates, requested, 1))
-    indices = np.argpartition(dark_gb, -count)[-count:]
-    candidates = image.reshape(-1, 3)[indices]
-
-    trim = int(count * config.background_trim_fraction)
-    if trim * 2 >= count:
-        trim = 0
-    ordered = np.sort(candidates, axis=0)
-    selected = ordered[trim : count - trim] if trim else ordered
-    return np.mean(selected, axis=0, dtype=np.float64).astype(np.float32)
-
-
-def compute_physics_features(
-    image_np: np.ndarray,
-    config: PhysicsConfig | None = None,
-) -> PhysicsFeatures:
-    """Compute robust, color-preserving UDCP features for fusion models."""
-    config = config or PhysicsConfig()
-    image = np.asarray(image_np, dtype=np.float32)
-    if image.ndim != 3 or image.shape[2] != 3:
-        raise ValueError(f"Expected image shape (H, W, 3), got {image.shape}")
-    if image.size and image.max() > 1.0:
-        image = image / 255.0
-    image = np.clip(image, 0.0, 1.0).astype(np.float32)
-
-    patch_size = scaled_odd_window(
-        config.patch_size, image.shape[:2], config.reference_size
-    )
-    radius = scaled_spatial_parameter(
-        config.guided_filter_radius, image.shape[:2], config.reference_size
-    )
-    background = estimate_background_light_robust(image, config)
-    safe_background = np.maximum(background, 1e-6)
-    normalized = np.clip(image / safe_background.reshape(1, 1, 3), 0.0, 1.0)
-    dark = np.min(normalized[:, :, 1:], axis=2)
-    dark_channel = minimum_filter(dark, size=patch_size, mode="reflect")
-    rough = np.clip(
-        1.0 - config.omega * dark_channel,
-        config.min_transmission,
-        1.0,
-    )
-    guide = np.mean(image, axis=2).astype(np.float32)
-    transmission = _guided_filter(
-        guide,
-        rough,
-        radius=radius,
-        eps=config.guided_filter_eps,
-    )
-    transmission = np.clip(
-        transmission, config.min_transmission, 1.0
-    ).astype(np.float32)
-    veiling = (
-        (1.0 - transmission[..., None]) * background.reshape(1, 1, 3)
-    ).astype(np.float32)
-    return PhysicsFeatures(transmission, background, veiling)

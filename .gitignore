@@ -26,6 +26,8 @@ datasets.zip
 
 # Reports and local tooling
 *.csv
+manuscript (2).tex
+project_process_report.tex
 .pytest_cache/
 .ruff_cache/
 .coverage

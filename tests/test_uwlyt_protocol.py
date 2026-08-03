@@ -26,7 +26,7 @@ def test_euvp_runner_uses_matched_three_seed_legacy_protocol():
 def test_uieb_runner_retains_prior_selection_and_protocol():
     args = ablation_uieb._make_parser().parse_args([])
     assert set(args.variants) >= UWLYT_VARIANTS
-    assert args.prior_methods == ["udcp", "gupdm"]
+    assert args.prior_methods == ["udcp"]
     assert args.num_runs == 3
     assert (args.nEpochs, args.batchSize, args.cropSize) == (50, 16, 256)
     assert (args.scheduler_step, args.scheduler_gamma) == (30, 0.5)

@@ -9,7 +9,6 @@ import random
 import sys
 import time
 from datetime import datetime
-from functools import partial
 from pathlib import Path
 
 import numpy as np
@@ -19,7 +18,6 @@ import torch.utils.data as data
 
 from uwir.config import option
 from uwir.models import build_model, parse_model_variant
-from uwir.physics import PhysicsConfig, compute_physics_features
 from uwir.training.schedulers import (
     CosineAnnealingRestartCyclicLR,
     CosineAnnealingRestartLR,
@@ -56,24 +54,11 @@ class _Tee:
 
 
 def _resolve_physics_extractor(prior_method: str):
-    """Select the physics feature extractor requested by --prior_method."""
-    from uwir.physics import (
-        compute_physics_maps,
-        compute_physics_maps_gdcp,
-        compute_physics_maps_gupdm,
-    )
+    """Return the physics extractor used by the reported paper experiments."""
+    from uwir.physics import compute_physics_maps
 
     if prior_method == "udcp":
         return compute_physics_maps
-    if prior_method == "gdcp":
-        return compute_physics_maps_gdcp
-    if prior_method == "gupdm":
-        return compute_physics_maps_gupdm
-    if prior_method == "multi_prior":
-        raise ValueError(
-            "--prior_method multi_prior is not wired to a single 4/5-channel "
-            "model input. Use udcp, gdcp, or gupdm."
-        )
     raise ValueError(f"Unknown --prior_method: {prior_method}")
 
 
@@ -81,7 +66,6 @@ def _add_physics_channels(
     rgb_tensor: torch.Tensor,
     mode: str,
     physics_extractor=None,
-    fusion_extractor=None,
 ) -> torch.Tensor:
     """
     Append physics-derived channels to an RGB tensor.
@@ -99,16 +83,6 @@ def _add_physics_channels(
     """
     if mode == "none":
         return rgb_tensor
-
-    if mode == "tv":
-        if fusion_extractor is None:
-            from uwir.physics import compute_physics_features
-
-            fusion_extractor = compute_physics_features
-        image = rgb_tensor.permute(1, 2, 0).numpy().astype(np.float32)
-        features = fusion_extractor(image)
-        maps = torch.from_numpy(features.as_7ch_maps()).permute(2, 0, 1)
-        return torch.cat([rgb_tensor, maps], dim=0)
 
     if physics_extractor is None:
         from uwir.physics import compute_physics_maps
@@ -134,7 +108,7 @@ def _add_physics_channels(
     raise ValueError(f"Unknown physics mode: '{mode}'")
 
 
-def _collate_train(batch, physics_mode: str, physics_extractor=None, fusion_extractor=None):
+def _collate_train(batch, physics_mode: str, physics_extractor=None):
     """
     Custom collate that:
       - Drops the filename strings returned by the dataset.
@@ -145,15 +119,15 @@ def _collate_train(batch, physics_mode: str, physics_extractor=None, fusion_extr
     inps = []
     gts = []
     for inp, gt, *_ in batch:
-        inp = _add_physics_channels(inp, physics_mode, physics_extractor, fusion_extractor)
+        inp = _add_physics_channels(inp, physics_mode, physics_extractor)
         inps.append(inp)
         gts.append(gt)
     return torch.stack(inps), torch.stack(gts)
 
 
-def _collate_val(batch, physics_mode: str, physics_extractor=None, fusion_extractor=None):
+def _collate_val(batch, physics_mode: str, physics_extractor=None):
     """Same as _collate_train but for validation paired datasets."""
-    return _collate_train(batch, physics_mode, physics_extractor, fusion_extractor)
+    return _collate_train(batch, physics_mode, physics_extractor)
 
 
 def _validation_copy(dataset):
@@ -423,7 +397,6 @@ def main():
 
     from uwir.data.factory import (
         get_euvp_training_set,
-        get_ufo120_training_set,
         get_uieb_training_set,
     )
     from uwir.losses import CompositeLoss
@@ -454,11 +427,6 @@ def main():
     # ------------------------------------------------------------------
     _, in_channels, physics_mode = parse_model_variant(args.model)
     physics_extractor = _resolve_physics_extractor(args.prior_method)
-    physics_config = PhysicsConfig(
-        guided_filter_radius=args.guided_filter_radius,
-        guided_filter_eps=args.guided_filter_eps,
-    )
-    fusion_extractor = partial(compute_physics_features, config=physics_config)
 
     # ------------------------------------------------------------------
     # Model
@@ -485,10 +453,10 @@ def main():
     # Datasets & DataLoaders
     # ------------------------------------------------------------------
     def collate_fn_train(batch):
-        return _collate_train(batch, physics_mode, physics_extractor, fusion_extractor)
+        return _collate_train(batch, physics_mode, physics_extractor)
 
     def collate_fn_val(batch):
-        return _collate_val(batch, physics_mode, physics_extractor, fusion_extractor)
+        return _collate_val(batch, physics_mode, physics_extractor)
 
     # Training dataset
     if args.dataset == "euvp":
@@ -501,10 +469,6 @@ def main():
     elif args.dataset == "uieb":
         train_ds = get_uieb_training_set(
             args.data_train_uieb, img_size=args.cropSize, in_memory=args.in_memory
-        )
-    elif args.dataset == "ufo120":
-        train_ds = get_ufo120_training_set(
-            args.data_train_euvp, img_size=args.cropSize, in_memory=args.in_memory
         )
     elif args.dataset == "euvp+uieb":
         euvp_ds = get_euvp_training_set(

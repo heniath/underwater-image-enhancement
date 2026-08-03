@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# run_ablation.sh  –  Run ablation_train_multi_run.py inside a tmux session
+# run_ablation.sh  –  Run the EUVP U-Net/UW-LYT ablation in tmux
 #
 # Features:
 #   • Persistent tmux session (survives SSH disconnect)
@@ -72,7 +72,7 @@ echo "================================================================"
 
 cd "\${PROJECT_DIR}"
 
-python ablation_train_multi_run.py \\
+python -m scripts.experiments.ablation_euvp \\
     --data_train_euvp "${DATA_ROOT}" \\
     --checkpoint_dir  "${CKPT_DIR}" \\
     --val_folder      "${VAL_FOLDER}" \\
