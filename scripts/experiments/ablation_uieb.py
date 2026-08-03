@@ -1,8 +1,8 @@
 """
-ablation_train_multi_run_uieb.py
+UIEB multi-seed paper/UW-LYT ablation
 =================================
 Train matched U-Net and UW-LYT variants (3ch, 4ch_t, 4ch_b, 5ch) from scratch
-on the UIEB dataset using both UDCP and GUPDM physics priors.
+on the UIEB dataset using the retained paper physics prior.
 
 Dataset split (fixed, sorted order):
   - Train / val pool : first 800 images (UIEB convention)
@@ -11,20 +11,20 @@ Dataset split (fixed, sorted order):
 Within each run the 10 % hold-out validation set is carved out of the
 800-image pool per-seed via random_split.
 
-Total runs: 8 variants x 2 priors x N seeds
-  Default:  8 x 2 x 3 = 48 runs
+Total runs: 8 variants x 1 prior x N seeds
+  Default:  8 x 1 x 3 = 24 runs
 
 Usage
 -----
-    # Default: 8 variants x 2 priors x 3 seeds, 50 epochs
-    python ablation_train_multi_run_uieb.py
+    # Default: 8 variants x 1 prior x 3 seeds, 50 epochs
+    python -m scripts.experiments.ablation_uieb
 
     # Custom seeds / epochs:
-    python ablation_train_multi_run_uieb.py \
+    python -m scripts.experiments.ablation_uieb \
         --data_uieb      ./datasets/UIEB \
         --checkpoint_dir ./checkpoints/ablation_uieb \
         --val_folder     ./results/ablation_uieb \
-        --prior_methods  udcp gupdm \
+        --prior_methods  udcp \
         --nEpochs        50 \
         --batchSize      16 \
         --num_runs       3 \
@@ -123,8 +123,8 @@ def _make_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description=(
             "Multi-seed UIEB ablation: train 4 UNet variants with "
-            "UDCP & GUPDM priors, N seeds each. "
-            "Default: 8 variants x 2 priors x 3 seeds = 48 runs."
+            "the paper prior, N seeds each. "
+            "Default: 8 variants x 1 prior x 3 seeds = 24 runs."
         ),
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
@@ -143,8 +143,8 @@ def _make_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--prior_methods", nargs="+",
-        default=["udcp", "gupdm"],
-        choices=["udcp", "gdcp", "gupdm"],
+        default=["udcp"],
+        choices=["udcp"],
         help="Physics prior(s) to iterate over.",
     )
 
@@ -180,7 +180,7 @@ def _make_parser() -> argparse.ArgumentParser:
         "--num_runs", type=int, default=3,
         help=(
             "Number of independent seeds per (variant, prior) pair. "
-            "Default 3 -> 8 variants x 2 priors x 3 seeds = 48 runs."
+            "Default 3 -> 8 variants x 1 prior x 3 seeds = 24 runs."
         ),
     )
     p.add_argument(
@@ -524,7 +524,7 @@ def main():
     print(f"Checkpoint dir : {args.checkpoint_dir}")
 
     # -----------------------------------------------------------------------
-    # Load UIEB dataset ONCE  (both priors share the same raw images)
+    # Load UIEB dataset once; all variants share the same raw images.
     # -----------------------------------------------------------------------
     print(f"\nLoading UIEB dataset from '{args.data_uieb}' ...")
 

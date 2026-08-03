@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # =============================================================================
 # run_ablation_uieb.sh
-# Run ablation_train_multi_run_uieb.py inside a persistent tmux session.
+# Run the UIEB U-Net/UW-LYT ablation inside a persistent tmux session.
 #
-# 8 variants x 2 priors (UDCP + GUPDM) x 3 seeds  =  48 training runs
+# 8 variants x 1 paper prior x 3 seeds = 24 training runs
 # Dataset: UIEB  (800 train/val  |  90 test)
 #
 # Usage:
@@ -19,7 +19,7 @@ CONDA_ENV="${CONDA_ENV:-uwir}"
 DATA_ROOT="${DATA_ROOT:-${PROJECT_DIR}/datasets/UIEB}"
 CKPT_DIR="${CKPT_DIR:-${PROJECT_DIR}/checkpoints/ablation_uieb}"
 VAL_FOLDER="${VAL_FOLDER:-${PROJECT_DIR}/results/ablation_uieb}"
-PRIOR_METHODS="${PRIOR_METHODS:-udcp gupdm}"   # space-separated list
+PRIOR_METHODS="${PRIOR_METHODS:-udcp}"   # paper prior
 N_EPOCHS="${N_EPOCHS:-50}"
 BATCH_SIZE="${BATCH_SIZE:-16}"
 NUM_RUNS="${NUM_RUNS:-3}"
@@ -67,7 +67,7 @@ echo "================================================================"
 
 cd "\${PROJECT_DIR}"
 
-python ablation_train_multi_run_uieb.py \
+python -m scripts.experiments.ablation_uieb \
     --data_uieb      "${DATA_ROOT}" \
     --checkpoint_dir "${CKPT_DIR}" \
     --val_folder     "${VAL_FOLDER}" \

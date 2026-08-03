@@ -13,7 +13,7 @@ from uwir.cli.train import _add_physics_channels, _resolve_physics_extractor
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("image", type=Path)
-    parser.add_argument("--prior-method", default="udcp", choices=("udcp", "gdcp", "gupdm"))
+    parser.add_argument("--prior-method", default="udcp", choices=("udcp",))
     parser.add_argument("--show", action="store_true")
     args = parser.parse_args(argv)
 

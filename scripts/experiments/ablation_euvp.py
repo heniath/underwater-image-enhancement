@@ -1,5 +1,5 @@
 """
-ablation_train_multi_run.py
+EUVP multi-seed paper/UW-LYT ablation
 ===========================
 Train matched U-Net and UW-LYT variants (3ch, 4ch_t, 4ch_b, 5ch) from scratch
 N times (default 3) using different random seeds, then evaluate every
@@ -13,10 +13,10 @@ Each seed controls:
 Usage
 -----
     # Default: matched U-Net/UW-LYT variants × 3 seeds, 50 epochs, EUVP, UDCP
-    python ablation_train_multi_run.py
+    python -m scripts.experiments.ablation_euvp
 
     # Custom:
-    python ablation_train_multi_run.py \\
+    python -m scripts.experiments.ablation_euvp \\
         --data_train_euvp ./datasets/EUVP \\
         --checkpoint_dir  ./checkpoints/ablation_multi \\
         --val_folder      ./results/ablation_multi \\
@@ -104,7 +104,7 @@ def _make_parser() -> argparse.ArgumentParser:
     p.add_argument("--val_folder", default="./results/ablation_multi",
                    help="Output directory for the JSON summary.")
     p.add_argument("--prior_method", default="udcp",
-                   choices=["udcp", "gdcp", "gupdm"],
+                   choices=["udcp"],
                    help="Physics prior (must be consistent across all variants).")
     p.add_argument("--euvp_subset", default="all",
                    help="EUVP subset(s) to use (all | underwater_imagenet | ...).")

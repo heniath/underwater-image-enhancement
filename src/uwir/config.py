@@ -4,54 +4,8 @@ Replaces the CIDNet low-light options with UWIR-specific arguments.
 """
 
 import argparse
-from dataclasses import dataclass
-from pathlib import Path
 
 from uwir.models import ALL_MODEL_NAMES
-
-_LEGACY_ATTRIBUTES = {
-    "batch_size": "batchSize",
-    "crop_size": "cropSize",
-    "epochs": "nEpochs",
-}
-
-
-class UWIRArgumentParser(argparse.ArgumentParser):
-    """Argument parser that exposes canonical and historical attribute names."""
-
-    def parse_known_args(self, args=None, namespace=None):
-        parsed, remaining = super().parse_known_args(args, namespace)
-        for canonical, legacy in _LEGACY_ATTRIBUTES.items():
-            value = getattr(parsed, canonical)
-            setattr(parsed, legacy, value)
-        return parsed, remaining
-
-
-@dataclass(frozen=True, slots=True)
-class TrainConfig:
-    """Typed view of the stable, reusable training configuration."""
-
-    model: str
-    dataset: str
-    batch_size: int
-    crop_size: int
-    epochs: int
-    learning_rate: float
-    checkpoint_dir: Path
-    seed: int
-
-    @classmethod
-    def from_namespace(cls, args: argparse.Namespace) -> "TrainConfig":
-        return cls(
-            model=args.model,
-            dataset=args.dataset,
-            batch_size=args.batch_size,
-            crop_size=args.crop_size,
-            epochs=args.epochs,
-            learning_rate=args.lr,
-            checkpoint_dir=Path(args.checkpoint_dir),
-            seed=args.seed,
-        )
 
 
 def _str2bool(v):
@@ -66,37 +20,30 @@ def _str2bool(v):
 
 
 def option():
-    parser = UWIRArgumentParser(description="UWIR — Physics-Guided Underwater Image Restoration")
+    parser = argparse.ArgumentParser(description="UWIR — Physics-Guided Underwater Image Restoration")
 
     # ------------------------------------------------------------------
     # Core training hyper-parameters
     # ------------------------------------------------------------------
     parser.add_argument(
-        "--batch-size",
         "--batchSize",
-        dest="batch_size",
         type=int,
         default=16,
         help="Training mini-batch size",
     )
     parser.add_argument(
-        "--crop-size",
         "--cropSize",
-        dest="crop_size",
         type=int,
         default=256,
         help="Resize target size for training images (height=width)",
     )
     parser.add_argument(
-        "--epochs",
         "--nEpochs",
-        dest="epochs",
         type=int,
         default=200,
         help="Total number of training epochs",
     )
     parser.add_argument(
-        "--start-epoch",
         "--start_epoch",
         type=int,
         default=0,
@@ -111,7 +58,6 @@ def option():
         "--resume ./checkpoints/run/epoch_0040.pth",
     )
     parser.add_argument(
-        "--run-name",
         "--run_name",
         type=str,
         default="",
@@ -125,11 +71,10 @@ def option():
     )
     parser.add_argument("--lr", type=float, default=1e-4, help="Initial learning rate (Adam)")
     parser.add_argument(
-        "--weight-decay", "--weight_decay", type=float, default=1e-5, help="Adam weight decay"
+        "--weight_decay", type=float, default=1e-5, help="Adam weight decay"
     )
-    parser.add_argument("--gpu-mode", "--gpu_mode", type=_str2bool, default=True)
+    parser.add_argument("--gpu_mode", type=_str2bool, default=True)
     parser.add_argument(
-        "--num-gpus",
         "--num_gpus",
         type=int,
         default=1,
@@ -143,7 +88,6 @@ def option():
         help="DataLoader worker threads (keep low to avoid OOM on Kaggle; 2-4 recommended)",
     )
     parser.add_argument(
-        "--in-memory",
         "--in_memory",
         type=_str2bool,
         default=False,
@@ -154,42 +98,36 @@ def option():
     # Learning-rate scheduler
     # ------------------------------------------------------------------
     parser.add_argument(
-        "--cos-restart",
         "--cos_restart",
         type=_str2bool,
         default=False,
         help="Use CosineAnnealingWarmRestarts scheduler",
     )
     parser.add_argument(
-        "--cos-restart-cyclic",
         "--cos_restart_cyclic",
         type=_str2bool,
         default=False,
         help="Use cyclic cosine restart variant",
     )
     parser.add_argument(
-        "--scheduler-step",
         "--scheduler_step",
         type=int,
         default=30,
         help="StepLR step size in epochs",
     )
     parser.add_argument(
-        "--scheduler-gamma",
         "--scheduler_gamma",
         type=float,
         default=0.5,
         help="StepLR decay factor",
     )
     parser.add_argument(
-        "--warmup-epochs",
         "--warmup_epochs",
         type=int,
         default=0,
         help="Number of linear warm-up epochs",
     )
     parser.add_argument(
-        "--start-warmup",
         "--start_warmup",
         type=_str2bool,
         default=False,
@@ -200,14 +138,13 @@ def option():
     # Early stopping
     # ------------------------------------------------------------------
     parser.add_argument(
-        "--early-stop-patience",
         "--early_stop_patience",
         type=int,
         default=20,
         help="Stop training if val SSIM does not improve for this many epochs (proposal §4.5)",
     )
     parser.add_argument(
-        "--val-interval",
+        "--val_interval",
         type=int,
         default=1,
         help="Compute validation metrics every N epochs; early stopping advances only then",
@@ -217,22 +154,19 @@ def option():
     # Physics front-end
     # ------------------------------------------------------------------
     parser.add_argument(
-        "--prior-method",
         "--prior_method",
         type=str,
         default="udcp",
-        choices=["udcp", "gdcp", "gupdm", "multi_prior"],
-        help="Transmission-map / background-light estimation method",
+        choices=["udcp"],
+        help="Paper transmission/background prior implementation",
     )
     parser.add_argument(
-        "--guided-filter-radius",
         "--guided_filter_radius",
         type=int,
         default=15,
         help="Radius for the guided image filter used to refine the transmission map",
     )
     parser.add_argument(
-        "--guided-filter-eps",
         "--guided_filter_eps",
         type=float,
         default=1e-3,
@@ -250,58 +184,33 @@ def option():
         help=(
             "Model variant (backbone_channels):\n"
             "  Channels: 3ch=RGB only | 4ch_t=RGB+t(x) | 4ch_b=RGB+B | 5ch=RGB+t(x)+B\n"
-            "  Backbones: unet | asppunet | mambabottleneck | mambaaspp | "
-            "resnet (ResNet-50) | mobilenet (MobileNetV3-Large) | "
-            "mambavision (MambaVision-T, hybrid Mamba+Transformer, NVIDIA 2024) | "
-            "mambaunet (native Mamba U-Net, VSS blocks throughout, ~29M params)"
+            "  Backbones: unet (paper) | uwlyt | uwlyttiny (retained experiments)"
         ),
     )
     parser.add_argument(
-        "--pretrained-backbone",
         "--pretrained_backbone",
         type=_str2bool,
         default=True,
-        help="Load ImageNet-pretrained weights for ResNet / MobileNet encoders",
-    )
-    parser.add_argument(
-        "--backbone",
-        type=str,
-        default="unet",
-        choices=[
-            "unet",
-            "asppunet",
-            "mambabottleneck",
-            "mambaaspp",
-            "resnet",
-            "mobilenet",
-            "mambavision",
-            "mambaunet",
-        ],
-        help="Refinement backbone architecture (inferred from --model if unset)",
+        help="Compatibility flag; retained models do not use pretrained backbones",
     )
 
     # ------------------------------------------------------------------
     # Loss weights  λ1·L_pixel + λ2·L_perceptual + λ3·L_SSIM
     # ------------------------------------------------------------------
     parser.add_argument(
-        "--l1-weight",
         "--L1_weight",
-        dest="L1_weight",
         type=float,
         default=1.0,
         help="λ1 — pixel-wise MAE loss weight",
     )
     parser.add_argument(
-        "--perceptual-weight",
         "--perceptual_weight",
         type=float,
         default=1.0,
         help="λ2 — VGG-16 perceptual loss weight",
     )
     parser.add_argument(
-        "--ssim-weight",
         "--SSIM_weight",
-        dest="SSIM_weight",
         type=float,
         default=0.0,
         help="λ3 — SSIM loss weight",
@@ -311,14 +220,12 @@ def option():
     # Training dataset paths
     # ------------------------------------------------------------------
     parser.add_argument(
-        "--data-train-euvp",
         "--data_train_euvp",
         type=str,
         default="./datasets/EUVP",
         help="Root of EUVP release (primary training corpus)",
     )
     parser.add_argument(
-        "--euvp-subset",
         "--euvp_subset",
         type=str,
         default="all",
@@ -330,7 +237,6 @@ def option():
         ),
     )
     parser.add_argument(
-        "--data-train-uieb",
         "--data_train_uieb",
         type=str,
         default="./datasets/UIEB",
@@ -341,53 +247,28 @@ def option():
     # Validation / evaluation input paths
     # ------------------------------------------------------------------
     parser.add_argument(
-        "--data-val-uieb",
         "--data_val_uieb",
         type=str,
         default="./datasets/UIEB/test/input",
         help="UIEB test-90 input images",
     )
     parser.add_argument(
-        "--data-val-ufo120",
-        "--data_val_ufo120",
-        type=str,
-        default="./datasets/UFO120/test/lrd",
-        help="UFO-120 test input images",
-    )
-    parser.add_argument(
-        "--data-val-euvp",
         "--data_val_euvp",
         type=str,
         default="./datasets/EUVP/Paired/underwater_imagenet/validation",
         help="EUVP unpaired validation images (no GT available)",
-    )
-    parser.add_argument(
-        "--data-val-u45",
-        "--data_val_u45",
-        type=str,
-        default="./datasets/U45",
-        help="U45 no-reference evaluation images",
     )
 
     # ------------------------------------------------------------------
     # Validation / evaluation ground-truth paths
     # ------------------------------------------------------------------
     parser.add_argument(
-        "--data-valgt-uieb",
         "--data_valgt_uieb",
         type=str,
         default="./datasets/UIEB/test/reference",
         help="UIEB test-90 reference (ground-truth) images",
     )
     parser.add_argument(
-        "--data-valgt-ufo120",
-        "--data_valgt_ufo120",
-        type=str,
-        default="./datasets/UFO120/test/hr",
-        help="UFO-120 test ground-truth images",
-    )
-    parser.add_argument(
-        "--data-valgt-euvp",
         "--data_valgt_euvp",
         type=str,
         default="",
@@ -398,35 +279,32 @@ def option():
     # Output
     # ------------------------------------------------------------------
     parser.add_argument(
-        "--val-folder",
         "--val_folder",
         type=str,
         default="./results/",
         help="Directory for saving validation output images",
     )
     parser.add_argument(
-        "--native-eval",
+        "--native_eval",
         type=_str2bool,
         default=True,
         help="Evaluate at native resolution in addition to the legacy square resize",
     )
     parser.add_argument(
-        "--eval-benchmark",
+        "--eval_benchmark",
         choices=["euvp", "uieb"],
         default="euvp",
         help="Paired benchmark evaluated by uwir-evaluate",
     )
-    parser.add_argument("--tile-size", type=int, default=512)
-    parser.add_argument("--tile-overlap", type=int, default=64)
+    parser.add_argument("--tile_size", type=int, default=512)
+    parser.add_argument("--tile_overlap", type=int, default=64)
     parser.add_argument(
-        "--checkpoint-dir",
         "--checkpoint_dir",
         type=str,
         default="./checkpoints/",
         help="Directory for saving model checkpoints",
     )
     parser.add_argument(
-        "--log-dir",
         "--log_dir",
         type=str,
         default="./logs/",
@@ -440,20 +318,18 @@ def option():
         "--seed", type=int, default=42, help="Global random seed for reproducibility"
     )
     parser.add_argument(
-        "--split-seed",
+        "--split_seed",
         type=int,
         default=42,
         help="Fixed data-split seed, independent of the model-training seed",
     )
     parser.add_argument(
-        "--grad-clip",
         "--grad_clip",
         type=_str2bool,
         default=True,
         help="Enable gradient clipping to stabilise training",
     )
     parser.add_argument(
-        "--grad-detect",
         "--grad_detect",
         type=_str2bool,
         default=False,
@@ -466,7 +342,7 @@ def option():
         help="Use automatic mixed precision on CUDA",
     )
     parser.add_argument(
-        "--grad-accumulation-steps",
+        "--grad_accumulation_steps",
         type=int,
         default=1,
         help="Accumulate this many mini-batches before each optimizer step",
@@ -479,12 +355,11 @@ def option():
         "--dataset",
         type=str,
         default="euvp",
-        choices=["euvp", "uieb", "ufo120", "euvp+uieb"],
+        choices=["euvp", "uieb", "euvp+uieb"],
         help=(
             "Training dataset:\n"
             "  euvp       — EUVP only  (primary, proposal §4.5)\n"
             "  uieb       — UIEB only\n"
-            "  ufo120     — UFO-120 only\n"
             "  euvp+uieb  — Combined EUVP + UIEB"
         ),
     )

@@ -7,7 +7,6 @@ import os
 import re
 import traceback
 from datetime import datetime
-from functools import partial
 from pathlib import Path
 
 import numpy as np
@@ -187,15 +186,6 @@ def main():
     np.random.seed(args.seed)
 
     physics_extractor = _resolve_physics_extractor(args.prior_method)
-    from uwir.physics import PhysicsConfig, compute_physics_features
-
-    fusion_extractor = partial(
-        compute_physics_features,
-        config=PhysicsConfig(
-            guided_filter_radius=args.guided_filter_radius,
-            guided_filter_eps=args.guided_filter_eps,
-        ),
-    )
 
     # ------------------------------------------------------------------
     # Dataset (built once; each model gets its own DataLoader)
@@ -249,7 +239,7 @@ def main():
             print(f"  Loaded epoch={ckpt_epoch}  stored metrics={ckpt_metrics}")
 
             def collate_fn(batch, mode=physics_mode):
-                return _collate_val(batch, mode, physics_extractor, fusion_extractor)
+                return _collate_val(batch, mode, physics_extractor)
 
             def make_loader(dataset, batch_size):
                 return data.DataLoader(
@@ -262,7 +252,7 @@ def main():
                 collate_fn=collate_fn,
                 )
 
-            legacy_loader = make_loader(legacy_ds, getattr(args, "batch_size", 1))
+            legacy_loader = make_loader(legacy_ds, args.batchSize)
             native_loader = make_loader(native_ds, 1)
 
             legacy_metrics, n_test = evaluate_loader(
