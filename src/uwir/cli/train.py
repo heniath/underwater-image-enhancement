@@ -55,10 +55,10 @@ class _Tee:
 
 def _resolve_physics_extractor(prior_method: str):
     """Return the physics extractor used by the reported paper experiments."""
-    from uwir.physics import compute_physics_maps
+    from uwir.physics import compute_physics_maps_rgb
 
     if prior_method == "udcp":
-        return compute_physics_maps
+        return compute_physics_maps_rgb
     raise ValueError(f"Unknown --prior_method: {prior_method}")
 
 
@@ -77,33 +77,63 @@ def _add_physics_channels(
                                ``"t"``    → append t(x)            (4-ch)
                                ``"b"``    → append B_map           (4-ch)
                                ``"tb"``   → append t(x) and B_map  (5-ch)
+                               ``"b_rgb"`` → append RGB B maps     (6-ch)
+                               ``"tb_rgb"``→ append t(x), RGB B    (7-ch)
 
     Returns:
-        Tensor: (C_out, H, W) where C_out ∈ {3, 4, 5}.
+        Tensor: (C_out, H, W) where C_out ∈ {3, 4, 5, 6, 7}.
     """
     if mode == "none":
         return rgb_tensor
 
     if physics_extractor is None:
-        from uwir.physics import compute_physics_maps
+        from uwir.physics import compute_physics_maps_rgb
 
-        physics_extractor = compute_physics_maps
+        physics_extractor = compute_physics_maps_rgb
 
     img_np = rgb_tensor.permute(1, 2, 0).numpy().astype(np.float32)
-    t_map, b_map = physics_extractor(img_np)
+    t_map, background = physics_extractor(img_np)
+    t_t = torch.from_numpy(np.asarray(t_map, dtype=np.float32)).unsqueeze(0)
 
     if mode == "t":
-        t_t = torch.from_numpy(t_map).unsqueeze(0)  # (1, H, W)
         return torch.cat([rgb_tensor, t_t], dim=0)  # (4, H, W)
 
+    background = np.asarray(background, dtype=np.float32)
+    height, width = rgb_tensor.shape[-2:]
+    if background.shape == (3,):
+        background_rgb = torch.from_numpy(background).view(3, 1, 1).expand(3, height, width)
+        background_scalar = torch.full(
+            (1, height, width), float(np.mean(background)), dtype=torch.float32
+        )
+    elif background.shape == (height, width):
+        background_rgb = None
+        background_scalar = torch.from_numpy(background).unsqueeze(0)
+    elif background.shape == (height, width, 3):
+        background_rgb = torch.from_numpy(background).permute(2, 0, 1)
+        background_scalar = background_rgb.mean(dim=0, keepdim=True)
+    elif background.shape == (3, height, width):
+        background_rgb = torch.from_numpy(background)
+        background_scalar = background_rgb.mean(dim=0, keepdim=True)
+    else:
+        raise ValueError(
+            "physics extractor background must have shape (3,), (H, W), "
+            f"(H, W, 3), or (3, H, W); got {background.shape}"
+        )
+
     if mode == "b":
-        b_t = torch.from_numpy(b_map).unsqueeze(0)  # (1, H, W)
-        return torch.cat([rgb_tensor, b_t], dim=0)  # (4, H, W)
+        return torch.cat([rgb_tensor, background_scalar], dim=0)  # (4, H, W)
 
     if mode == "tb":
-        t_t = torch.from_numpy(t_map).unsqueeze(0)  # (1, H, W)
-        b_t = torch.from_numpy(b_map).unsqueeze(0)  # (1, H, W)
-        return torch.cat([rgb_tensor, t_t, b_t], dim=0)  # (5, H, W)
+        return torch.cat([rgb_tensor, t_t, background_scalar], dim=0)  # (5, H, W)
+
+    if mode in ("b_rgb", "tb_rgb"):
+        if background_rgb is None:
+            raise ValueError(
+                f"physics mode {mode!r} requires RGB background light; "
+                "the extractor returned a legacy scalar map"
+            )
+        extras = [background_rgb] if mode == "b_rgb" else [t_t, background_rgb]
+        return torch.cat([rgb_tensor, *extras], dim=0)
 
     raise ValueError(f"Unknown physics mode: '{mode}'")
 

@@ -129,13 +129,16 @@ def benchmark_model(
 
         physics_extractor = _resolve_physics_extractor(prior_method)
 
+    def _make_augmented_cpu(rgb_image, mode, extractor):
+        from uwir.cli.train import _add_physics_channels
+
+        return _add_physics_channels(rgb_image, mode, extractor)
+
     def make_input() -> torch.Tensor:
         """Build model input, including legacy prior generation when required."""
         if physics_mode == "none":
             return rgb.to(device)
-        from uwir.cli.train import _add_physics_channels
-
-        augmented = _add_physics_channels(rgb[0], physics_mode, physics_extractor)
+        augmented = _make_augmented_cpu(rgb[0], physics_mode, physics_extractor)
         return augmented.unsqueeze(0).to(device)
 
     dummy = make_input()
@@ -144,25 +147,44 @@ def benchmark_model(
     try:
         with torch.no_grad():
             for _ in range(warmup_runs):
-                _ = model(make_input())
+                _ = model(dummy)
         if device.type == "cuda":
             torch.cuda.synchronize()
     except Exception as exc:
         print(f"[SKIP] {model_name}: forward pass failed during warm-up – {exc}\n")
         return None
 
-    # ---- timed runs --------------------------------------------------------
+    # ---- model-only timed runs --------------------------------------------
     if device.type == "cuda":
         torch.cuda.synchronize()
-    if device.type == "cuda":
         torch.cuda.reset_peak_memory_stats(device)
-    t_start = time.perf_counter()
+    model_start = time.perf_counter()
     with torch.no_grad():
         for _ in range(timed_runs):
-            _ = model(make_input())
+            _ = model(dummy)
     if device.type == "cuda":
         torch.cuda.synchronize()
-    elapsed_ms = (time.perf_counter() - t_start) / timed_runs * 1e3
+    model_ms = (time.perf_counter() - model_start) / timed_runs * 1e3
+
+    # UDCP is CPU preprocessing. Report it separately and then measure the
+    # complete preprocessing + transfer + model path for physics variants.
+    prior_ms = 0.0
+    combined_ms = model_ms
+    if physics_mode != "none":
+        prior_start = time.perf_counter()
+        for _ in range(timed_runs):
+            _ = _make_augmented_cpu(rgb[0], physics_mode, physics_extractor)
+        prior_ms = (time.perf_counter() - prior_start) / timed_runs * 1e3
+
+        if device.type == "cuda":
+            torch.cuda.synchronize()
+        combined_start = time.perf_counter()
+        with torch.no_grad():
+            for _ in range(timed_runs):
+                _ = model(make_input())
+        if device.type == "cuda":
+            torch.cuda.synchronize()
+        combined_ms = (time.perf_counter() - combined_start) / timed_runs * 1e3
     if device.type == "cuda":
         peak_memory_mb = torch.cuda.max_memory_allocated(device) / 2**20
     else:
@@ -192,10 +214,9 @@ def benchmark_model(
     print(f"  Params  : {params_m:.3f} M")
     print(f"  FLOPs   : {flops_str}")
     print(f"  Peak mem: {peak_memory_mb:.2f} MiB")
-    print(
-        f"  Time    : {elapsed_ms:.2f} ms  "
-        f"(avg over {timed_runs} run{'s' if timed_runs > 1 else ''}, no grad)"
-    )
+    print(f"  Model   : {model_ms:.2f} ms")
+    print(f"  Prior   : {prior_ms:.2f} ms ({prior_method}; CPU)")
+    print(f"  Combined: {combined_ms:.2f} ms")
 
     return {
         "model": model_name,
@@ -205,9 +226,10 @@ def benchmark_model(
         "params_M": round(params_m, 3),
         "flops_G": round(flops_g, 3) if flops_g is not None else "N/A",
         "peak_memory_MiB": round(peak_memory_mb, 2),
-        "time_ms": round(elapsed_ms, 2),
+        "model_time_ms": round(model_ms, 2),
+        "prior_time_ms": round(prior_ms, 2),
+        "combined_time_ms": round(combined_ms, 2),
         "memory_scope": "CUDA allocated" if device.type == "cuda" else "process peak RSS",
-        "latency_scope": f"{prior_method}+model" if physics_mode != "none" else "model",
     }
 
 
@@ -357,7 +379,7 @@ def main(argv=None):
         if rows:
             hdr = (
                 f"{'Model':<22} {'Ch':>3}  {'Params(M)':>10}  {'FLOPs(G)':>10}  "
-                f"{'Peak(MiB)':>10}  {'Time(ms)':>10}  {'Scope':>12}"
+                f"{'Peak(MiB)':>10}  {'Model(ms)':>10}  {'Prior(ms)':>10}  {'Total(ms)':>10}"
             )
             print(f"\n{hdr}")
             print("-" * len(hdr))
@@ -368,8 +390,8 @@ def main(argv=None):
                 print(
                     f"  {r['model']:<20} {r['in_channels']:>3}  "
                     f"{r['params_M']:>10.3f}  {flops_disp:>10}  "
-                    f"{r['peak_memory_MiB']:>10.2f}  {r['time_ms']:>10.2f}  "
-                    f"{r['latency_scope']:>12}"
+                    f"{r['peak_memory_MiB']:>10.2f}  {r['model_time_ms']:>10.2f}  "
+                    f"{r['prior_time_ms']:>10.2f}  {r['combined_time_ms']:>10.2f}"
                 )
         print()
 
