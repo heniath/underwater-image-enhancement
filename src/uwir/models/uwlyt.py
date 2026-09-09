@@ -80,33 +80,17 @@ class LowResolutionAttention(nn.Module):
         self.gate = nn.Parameter(torch.zeros(()))
 
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
-        pooled = (
-            inputs
-            if self.reduction == 1
-            else F.avg_pool2d(inputs, self.reduction, self.reduction)
-        )
-        # Channel chunks retain the parent tensor's batch stride and are not
-        # contiguous.  Explicit materialisation avoids misaligned-address
-        # failures observed in batched GEMM on T4/DataParallel.
-        query, key, value = (
-            chunk.contiguous() for chunk in self.qkv(pooled).chunk(3, dim=1)
-        )
+        pooled = F.avg_pool2d(inputs, self.reduction, self.reduction)
+        query, key, value = self.qkv(pooled).chunk(3, dim=1)
         batch, channels, height, width = query.shape
-        query = F.normalize(query.flatten(2), dim=-1).contiguous()
-        key = F.normalize(key.flatten(2), dim=-1).contiguous()
-        value = value.flatten(2).contiguous()
-        attention = torch.softmax(
-            torch.bmm(query, key.transpose(1, 2).contiguous()) / math.sqrt(channels),
-            dim=-1,
-        )
-        attended = torch.bmm(attention.contiguous(), value).reshape(
-            batch, channels, height, width
-        )
+        query = F.normalize(query.flatten(2), dim=-1)
+        key = F.normalize(key.flatten(2), dim=-1)
+        attention = torch.softmax(query @ key.transpose(1, 2) / math.sqrt(channels), dim=-1)
+        attended = (attention @ value.flatten(2)).view(batch, channels, height, width)
         attended = self.project(attended)
-        if attended.shape[-2:] != inputs.shape[-2:]:
-            attended = F.interpolate(
-                attended, size=inputs.shape[-2:], mode="bilinear", align_corners=False
-            )
+        attended = F.interpolate(
+            attended, size=inputs.shape[-2:], mode="bilinear", align_corners=False
+        )
         return inputs + self.gate * attended
 
 
