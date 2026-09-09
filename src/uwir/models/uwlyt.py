@@ -94,6 +94,155 @@ class LowResolutionAttention(nn.Module):
         return inputs + self.gate * attended
 
 
+def _pad_to_multiple(
+    inputs: torch.Tensor, multiple: int
+) -> tuple[torch.Tensor, int, int]:
+    height, width = inputs.shape[-2:]
+    pad_h = (-height) % multiple
+    pad_w = (-width) % multiple
+    if not (pad_h or pad_w):
+        return inputs, 0, 0
+    mode = "reflect" if height > pad_h and width > pad_w else "replicate"
+    return F.pad(inputs, (0, pad_w, 0, pad_h), mode=mode), pad_h, pad_w
+
+
+class SeparableDownsample(nn.Module):
+    """Stride-two depthwise convolution followed by inexpensive channel mixing."""
+
+    def __init__(self, in_channels: int, out_channels: int):
+        super().__init__()
+        self.depthwise = nn.Conv2d(
+            in_channels,
+            in_channels,
+            3,
+            stride=2,
+            padding=1,
+            groups=in_channels,
+        )
+        self.project = nn.Conv2d(in_channels, out_channels, 1)
+        self.norm = nn.GroupNorm(1, out_channels)
+
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        return F.silu(self.norm(self.project(self.depthwise(inputs))))
+
+
+class SkipFusion(nn.Module):
+    """Bilinearly upsample, fuse an encoder skip, and refine the result."""
+
+    def __init__(self, in_channels: int, skip_channels: int, out_channels: int):
+        super().__init__()
+        self.project = nn.Conv2d(in_channels + skip_channels, out_channels, 1)
+        self.norm = nn.GroupNorm(1, out_channels)
+        self.refine = AxialDepthwiseBlock(out_channels)
+
+    def forward(self, inputs: torch.Tensor, skip: torch.Tensor) -> torch.Tensor:
+        inputs = F.interpolate(
+            inputs, size=skip.shape[-2:], mode="bilinear", align_corners=False
+        )
+        inputs = F.silu(self.norm(self.project(torch.cat((inputs, skip), dim=1))))
+        return self.refine(inputs)
+
+
+class UWLYTMS(nn.Module):
+    """Multiscale UW-LYT with a lightweight encoder-decoder and detail skips.
+
+    The original UW-LYT remains available for checkpoint compatibility.  This
+    variant trades a modest parameter increase for the progressively larger
+    receptive field that the flat, full-resolution architecture lacks.
+    """
+
+    def __init__(self, in_channels: int = 3, width: int = 32):
+        super().__init__()
+        if in_channels not in (3, 4, 5):
+            raise ValueError("UWLYTMS supports 3, 4, or 5 input channels")
+        if width < 16:
+            raise ValueError("UWLYTMS width must be at least 16")
+
+        self.in_channels = in_channels
+        self.width = width
+        stem_channels = width // 2
+        level_channels = (width, width + stem_channels, width * 2, width * 5 // 2)
+
+        self.luminance_stem = nn.Conv2d(1, stem_channels, 3, padding=1)
+        self.chrominance_stem = nn.Conv2d(2, width - stem_channels, 3, padding=1)
+
+        prior_channels = in_channels - 3
+        if prior_channels:
+            self.prior_projection = nn.Sequential(
+                nn.Conv2d(prior_channels, stem_channels, 1),
+                nn.SiLU(),
+            )
+            self.stem_fusion = nn.Sequential(
+                nn.Conv2d(width + stem_channels, width, 1),
+                nn.GroupNorm(1, width),
+                nn.SiLU(),
+            )
+        else:
+            self.prior_projection = None
+            self.stem_fusion = nn.Identity()
+
+        self.level0 = nn.Sequential(
+            AxialDepthwiseBlock(level_channels[0]),
+            AxialDepthwiseBlock(level_channels[0]),
+        )
+        self.down1 = SeparableDownsample(level_channels[0], level_channels[1])
+        self.level1 = nn.Sequential(
+            AxialDepthwiseBlock(level_channels[1]),
+            AxialDepthwiseBlock(level_channels[1]),
+        )
+        self.down2 = SeparableDownsample(level_channels[1], level_channels[2])
+        self.level2 = nn.Sequential(
+            AxialDepthwiseBlock(level_channels[2]),
+            AxialDepthwiseBlock(level_channels[2]),
+        )
+        self.down3 = SeparableDownsample(level_channels[2], level_channels[3])
+        self.bottleneck = nn.Sequential(
+            AxialDepthwiseBlock(level_channels[3]),
+            AxialDepthwiseBlock(level_channels[3]),
+            LowResolutionAttention(level_channels[3], reduction=1),
+        )
+
+        self.up2 = SkipFusion(level_channels[3], level_channels[2], level_channels[2])
+        self.up1 = SkipFusion(level_channels[2], level_channels[1], level_channels[1])
+        self.up0 = SkipFusion(level_channels[1], level_channels[0], level_channels[0])
+        self.residual_head = nn.Conv2d(level_channels[0], 3, 3, padding=1)
+        nn.init.zeros_(self.residual_head.weight)
+        nn.init.zeros_(self.residual_head.bias)
+
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        if inputs.ndim != 4 or inputs.shape[1] != self.in_channels:
+            raise ValueError(
+                f"expected NCHW input with {self.in_channels} channels, got {tuple(inputs.shape)}"
+            )
+        inputs, pad_h, pad_w = _pad_to_multiple(inputs, multiple=8)
+        rgb = inputs[:, :3]
+        ycbcr = rgb_to_ycbcr(rgb)
+
+        features = torch.cat(
+            (
+                self.luminance_stem(ycbcr[:, :1]),
+                self.chrominance_stem(ycbcr[:, 1:]),
+            ),
+            dim=1,
+        )
+        if self.prior_projection is not None:
+            features = torch.cat((features, self.prior_projection(inputs[:, 3:])), dim=1)
+        skip0 = self.level0(self.stem_fusion(features))
+        skip1 = self.level1(self.down1(skip0))
+        skip2 = self.level2(self.down2(skip1))
+        encoded = self.bottleneck(self.down3(skip2))
+        decoded = self.up0(self.up1(self.up2(encoded, skip2), skip1), skip0)
+
+        ycbcr_residual = self.residual_head(decoded)
+        rgb_residual = ycbcr_to_rgb(ycbcr + ycbcr_residual) - ycbcr_to_rgb(ycbcr)
+        output = torch.clamp(rgb + rgb_residual, 0.0, 1.0)
+        if pad_h:
+            output = output[..., :-pad_h, :]
+        if pad_w:
+            output = output[..., :, :-pad_w]
+        return output
+
+
 class UWLYT(nn.Module):
     """Underwater LYT model supporting RGB and legacy physics-channel inputs."""
 
@@ -166,6 +315,11 @@ class UWLYT(nn.Module):
 def build_uwlyt(in_channels: int, tiny: bool = False) -> UWLYT:
     """Construct a standard (40-wide) or tiny (24-wide) UW-LYT."""
     return UWLYT(in_channels=in_channels, width=24 if tiny else 40)
+
+
+def build_uwlytms(in_channels: int) -> UWLYTMS:
+    """Construct the multiscale UW-LYT candidate at its matched width."""
+    return UWLYTMS(in_channels=in_channels, width=32)
 
 
 class TransmissionGate(nn.Module):
@@ -317,8 +471,10 @@ __all__ = [
     "BackgroundConditioner",
     "TransmissionGate",
     "UWLYT",
+    "UWLYTMS",
     "UWLYTV2",
     "build_uwlyt",
+    "build_uwlytms",
     "build_uwlytv2",
     "rgb_to_ycbcr",
     "ycbcr_to_rgb",
