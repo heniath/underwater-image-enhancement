@@ -352,10 +352,6 @@ def train_epoch(
         for k in comps:
             comps[k] += parts.get(k, 0.0)
 
-        # Chỉ in log ra màn hình mỗi 50 batch để tránh tràn I/O
-        if (batch_idx + 1) % 50 == 0:
-            print(f"   [Batch {batch_idx + 1}/{len(loader)}] Loss: {loss.item():.4f}")
-
     n = len(loader)
     return tot_loss / n, {k: v / n for k, v in comps.items()}
 
