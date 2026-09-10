@@ -143,6 +143,20 @@ class SkipFusion(nn.Module):
         return self.refine(inputs)
 
 
+class ChannelFusion(nn.Module):
+    """Mix independently processed colour channels and recalibrate the result."""
+
+    def __init__(self, in_channels: int, out_channels: int):
+        super().__init__()
+        self.project = nn.Conv2d(in_channels, out_channels, 1)
+        self.norm = nn.GroupNorm(1, out_channels)
+        self.se = SqueezeExcitation(out_channels)
+
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        features = F.silu(self.norm(self.project(inputs)))
+        return self.se(features)
+
+
 class UWLYTMS(nn.Module):
     """Multiscale UW-LYT with a lightweight encoder-decoder and detail skips.
 
@@ -322,6 +336,79 @@ def build_uwlytms(in_channels: int) -> UWLYTMS:
     return UWLYTMS(in_channels=in_channels, width=32)
 
 
+class UWLYTMSV2(UWLYTMS):
+    """LYT-inspired multiscale model with late Y/Cb/Cr fusion.
+
+    The multiscale encoder-decoder from :class:`UWLYTMS` is retained, while
+    each colour component receives a small denoising and attention path before
+    fusion.  A luminance bypass at the output preserves structure that may be
+    weakened by the shared bottleneck.
+    """
+
+    def __init__(self, in_channels: int = 3, width: int = 32):
+        super().__init__(in_channels=in_channels, width=width)
+        luminance_channels = width // 2
+        cb_channels = width // 4
+        cr_channels = width - luminance_channels - cb_channels
+
+        self.luminance_stem = nn.Conv2d(1, luminance_channels, 3, padding=1)
+        self.cb_stem = nn.Conv2d(1, cb_channels, 3, padding=1)
+        self.cr_stem = nn.Conv2d(1, cr_channels, 3, padding=1)
+        del self.chrominance_stem
+
+        self.luminance_path = nn.Sequential(
+            AxialDepthwiseBlock(luminance_channels),
+            LowResolutionAttention(luminance_channels),
+        )
+        self.cb_path = nn.Sequential(
+            AxialDepthwiseBlock(cb_channels),
+            LowResolutionAttention(cb_channels),
+        )
+        self.cr_path = nn.Sequential(
+            AxialDepthwiseBlock(cr_channels),
+            LowResolutionAttention(cr_channels),
+        )
+        self.channel_fusion = ChannelFusion(width, width)
+        self.output_fusion = ChannelFusion(width + luminance_channels, width)
+
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        if inputs.ndim != 4 or inputs.shape[1] != self.in_channels:
+            raise ValueError(
+                f"expected NCHW input with {self.in_channels} channels, got {tuple(inputs.shape)}"
+            )
+        inputs, pad_h, pad_w = _pad_to_multiple(inputs, multiple=8)
+        rgb = inputs[:, :3]
+        ycbcr = rgb_to_ycbcr(rgb)
+
+        luminance = self.luminance_path(self.luminance_stem(ycbcr[:, :1]))
+        cb = self.cb_path(self.cb_stem(ycbcr[:, 1:2]))
+        cr = self.cr_path(self.cr_stem(ycbcr[:, 2:3]))
+        features = self.channel_fusion(torch.cat((luminance, cb, cr), dim=1))
+        if self.prior_projection is not None:
+            features = torch.cat((features, self.prior_projection(inputs[:, 3:])), dim=1)
+
+        skip0 = self.level0(self.stem_fusion(features))
+        skip1 = self.level1(self.down1(skip0))
+        skip2 = self.level2(self.down2(skip1))
+        encoded = self.bottleneck(self.down3(skip2))
+        decoded = self.up0(self.up1(self.up2(encoded, skip2), skip1), skip0)
+        decoded = self.output_fusion(torch.cat((decoded, luminance), dim=1))
+
+        ycbcr_residual = self.residual_head(decoded)
+        rgb_residual = ycbcr_to_rgb(ycbcr + ycbcr_residual) - ycbcr_to_rgb(ycbcr)
+        output = torch.clamp(rgb + rgb_residual, 0.0, 1.0)
+        if pad_h:
+            output = output[..., :-pad_h, :]
+        if pad_w:
+            output = output[..., :, :-pad_w]
+        return output
+
+
+def build_uwlytmsv2(in_channels: int) -> UWLYTMSV2:
+    """Construct the LYT-inspired multiscale candidate at its matched width."""
+    return UWLYTMSV2(in_channels=in_channels, width=32)
+
+
 class TransmissionGate(nn.Module):
     """Modulate main features from a cheaply processed quarter-scale transmission map."""
 
@@ -472,9 +559,11 @@ __all__ = [
     "TransmissionGate",
     "UWLYT",
     "UWLYTMS",
+    "UWLYTMSV2",
     "UWLYTV2",
     "build_uwlyt",
     "build_uwlytms",
+    "build_uwlytmsv2",
     "build_uwlytv2",
     "rgb_to_ycbcr",
     "ycbcr_to_rgb",

@@ -1,8 +1,13 @@
 import pytest
 import torch
 
-from uwir.models import UWLYTMS, ModelSpec, build_model, parse_model_variant
-from uwir.models.uwlyt import LowResolutionAttention, SeparableDownsample, SkipFusion
+from uwir.models import UWLYTMS, UWLYTMSV2, ModelSpec, build_model, parse_model_variant
+from uwir.models.uwlyt import (
+    ChannelFusion,
+    LowResolutionAttention,
+    SeparableDownsample,
+    SkipFusion,
+)
 
 
 @pytest.mark.parametrize(
@@ -55,6 +60,47 @@ def test_multiscale_model_has_finite_gradients_after_identity_head_opens():
             module for module in model.modules() if isinstance(module, LowResolutionAttention)
         )
         attention.gate.fill_(1e-2)
+
+    inputs = torch.rand(2, 3, 33, 39)
+    target = torch.rand(2, 3, 33, 39)
+    torch.nn.functional.l1_loss(model(inputs), target).backward()
+
+    gradients = [parameter.grad for parameter in model.parameters() if parameter.requires_grad]
+    assert all(gradient is not None for gradient in gradients)
+    assert all(torch.isfinite(gradient).all() for gradient in gradients)
+
+
+@pytest.mark.parametrize("channels", (3, 4, 5))
+def test_lyt_inspired_multiscale_variant_preserves_shape_and_identity(channels):
+    model = build_model(
+        {3: "uwlytmsv2_3ch", 4: "uwlytmsv2_4ch_t", 5: "uwlytmsv2_5ch"}[channels]
+    ).eval()
+    inputs = torch.rand(1, channels, 31, 35)
+
+    with torch.no_grad():
+        output = model(inputs)
+
+    assert output.shape == (1, 3, 31, 35)
+    assert torch.equal(output, inputs[:, :3])
+    assert sum(parameter.numel() for parameter in model.parameters()) <= 130_000
+
+
+def test_lyt_inspired_multiscale_variant_keeps_channels_separate_until_fusion():
+    model = UWLYTMSV2()
+
+    assert model.cb_stem.in_channels == 1
+    assert model.cr_stem.in_channels == 1
+    assert sum(isinstance(module, LowResolutionAttention) for module in model.modules()) == 4
+    assert sum(isinstance(module, ChannelFusion) for module in model.modules()) == 2
+
+
+def test_lyt_inspired_multiscale_variant_has_finite_gradients():
+    model = UWLYTMSV2()
+    with torch.no_grad():
+        model.residual_head.weight.fill_(1e-3)
+        for module in model.modules():
+            if isinstance(module, LowResolutionAttention):
+                module.gate.fill_(1e-2)
 
     inputs = torch.rand(2, 3, 33, 39)
     target = torch.rand(2, 3, 33, 39)

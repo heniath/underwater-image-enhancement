@@ -30,6 +30,7 @@ _BACKBONE_VARIANTS = {
     "uwlyt": _LEGACY_VARIANTS,
     "uwlyttiny": _LEGACY_VARIANTS,
     "uwlytms": _LEGACY_VARIANTS,
+    "uwlytmsv2": _LEGACY_VARIANTS,
     "uwlytv2": _V2_VARIANTS,
     "uwlytv2tiny": _V2_VARIANTS,
 }
@@ -64,10 +65,12 @@ def build_model(name: str, pretrained_backbone: bool = False) -> nn.Module:
 
         return UNet5ch(in_channels=in_channels)
 
-    from .uwlyt import build_uwlyt, build_uwlytms, build_uwlytv2
+    from .uwlyt import build_uwlyt, build_uwlytms, build_uwlytmsv2, build_uwlytv2
 
     if backbone in ("uwlytv2", "uwlytv2tiny"):
         return build_uwlytv2(physics_schema, tiny=backbone == "uwlytv2tiny")
     if backbone == "uwlytms":
         return build_uwlytms(in_channels)
+    if backbone == "uwlytmsv2":
+        return build_uwlytmsv2(in_channels)
     return build_uwlyt(in_channels, tiny=backbone == "uwlyttiny")
