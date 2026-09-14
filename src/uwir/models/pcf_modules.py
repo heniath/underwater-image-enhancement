@@ -7,6 +7,8 @@ Modules adapted from PCF-Net (Remote Sensing 2026) for underwater image restorat
   3. Value-Confidence Module (ValueConfidenceModule)
   4. Channel-Spatial Adaptive Gated Fusion (CSAGF)
   5. Structural Re-parameterization Depthwise Conv (RepDepthwiseConv2d)
+  6. Re-parameterizable Depthwise Separable Conv (RepDSC)
+  7. Re-parameterizable 3x3 Conv Block (Rep3C)
 """
 
 import math
@@ -308,3 +310,61 @@ class RepDepthwiseConv2d(nn.Module):
         del self.bn_identity
 
         self.is_deployed = True
+
+
+# ---------------------------------------------------------------------------
+# 6. Re-parameterizable Depthwise Separable Conv (RepDSC)
+# ---------------------------------------------------------------------------
+class RepDSC(nn.Module):
+    """
+    Re-parameterizable Depthwise Separable Convolution block (RepDSC) from PCF-Net.
+    Comprises:
+      1. Depthwise stage: RepDepthwiseConv2d (3x3 + 1x1 + Identity BN during train; single 3x3 during deploy)
+      2. Pointwise stage: 1x1 Conv + BN + ReLU
+    """
+
+    def __init__(self, in_ch: int, out_ch: int, stride: int = 1):
+        super().__init__()
+        self.stride = stride
+        self.depthwise = RepDepthwiseConv2d(in_ch)
+        self.pointwise = nn.Sequential(
+            nn.Conv2d(in_ch, out_ch, kernel_size=1, bias=False),
+            nn.BatchNorm2d(out_ch),
+            nn.ReLU(inplace=True),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        out = self.depthwise(x)
+        if self.stride > 1:
+            out = F.max_pool2d(out, kernel_size=self.stride, stride=self.stride)
+        return self.pointwise(out)
+
+    def switch_to_deploy(self):
+        self.depthwise.switch_to_deploy()
+
+
+# ---------------------------------------------------------------------------
+# 7. Re-parameterizable 3x3 Conv Block (Rep3C)
+# ---------------------------------------------------------------------------
+class Rep3C(nn.Module):
+    """
+    Re-parameterizable 3x3 Convolution Block (Rep3C) from PCF-Net.
+    Used for feature refinement and skip-connection fusion in the decoder.
+    """
+
+    def __init__(self, in_ch: int, out_ch: int):
+        super().__init__()
+        self.depthwise = RepDepthwiseConv2d(in_ch)
+        self.pointwise = nn.Sequential(
+            nn.Conv2d(in_ch, out_ch, kernel_size=1, bias=False),
+            nn.BatchNorm2d(out_ch),
+            nn.ReLU(inplace=True),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        out = self.depthwise(x)
+        return self.pointwise(out)
+
+    def switch_to_deploy(self):
+        self.depthwise.switch_to_deploy()
+
