@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Kaggle Multi-Account & Multi-Thread Orchestration Hub</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+  <div class="app-layout">
+    
+    <!-- Top Navigation Header -->
+    <header class="app-header">
+      <div class="header-left">
+        <div class="brand-logo">
+          <div class="brand-info">
+            <span class="brand-title">KAGGLE ORCHESTRATOR</span>
+            <span class="brand-subtitle">Multi-Account Parallel UWIR Hub</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="header-center">
+        <div class="project-selector-wrapper">
+          <label for="projectSelector">Project:</label>
+          <select id="projectSelector" class="custom-select">
+            <option value="underwater_image_enhancement">underwater_image_enhancement</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="header-right">
+        <div class="connection-status">
+          <span class="status-dot online"></span>
+          <span class="status-label">FastAPI Engine Active</span>
+        </div>
+        <button id="btnQuickRunAll" class="btn btn-primary">Run All Parallel</button>
+        <button id="btnQuickRefresh" class="btn btn-secondary">Refresh</button>
+        <button id="btnQuickDownload" class="btn btn-secondary">Download All</button>
+      </div>
+    </header>
+
+    <!-- Navigation Tabs Bar -->
+    <nav class="tabs-nav">
+      <button class="nav-tab active" data-tab="tab-dashboard">Overview & Quotas</button>
+      <button class="nav-tab" data-tab="tab-threads">
+        Thread Jobs <span id="threadCountBadge" class="tab-badge">0</span>
+      </button>
+      <button class="nav-tab" data-tab="tab-ai-chat">AI Assistant</button>
+      <button class="nav-tab" data-tab="tab-analytics">Benchmark Analytics</button>
+      <button class="nav-tab" data-tab="tab-logs">Execution Logs</button>
+      <button class="nav-tab" data-tab="tab-settings">Accounts & Git</button>
+    </nav>
+
+    <!-- Main Content Body -->
+    <main class="app-main">
+
+      <!-- ========================================================= -->
+      <!-- TAB 1: OVERVIEW & GPU QUOTAS -->
+      <!-- ========================================================= -->
+      <section id="tab-dashboard" class="tab-pane active">
+        <div class="pane-header">
+          <div>
+            <h2>Accounts & GPU Quota Tracker</h2>
+            <p class="text-muted">Track weekly GPU runtime (30h limit/account) and active batch GPU slots (maximum 2 slots/account).</p>
+          </div>
+          <button id="btnScanQuotas" class="btn btn-accent">Scan All Quotas</button>
+        </div>
+
+        <!-- Accounts Grid -->
+        <div id="accountsGrid" class="accounts-grid">
+          <div class="loading-spinner">Loading account statuses...</div>
+        </div>
+
+        <!-- Quick Summary Stats Bar -->
+        <div class="dashboard-stats-bar">
+          <div class="stat-box">
+            <span class="stat-label">Total Accounts:</span>
+            <span id="totalAccountsVal" class="stat-value">0</span>
+          </div>
+          <div class="stat-box">
+            <span class="stat-label">Active GPU Slots:</span>
+            <span id="totalActiveSlotsVal" class="stat-value text-cyan">0 / 0</span>
+          </div>
+          <div class="stat-box">
+            <span class="stat-label">Configured Threads:</span>
+            <span id="totalJobsVal" class="stat-value text-indigo">0</span>
+          </div>
+          <div class="stat-box">
+            <span class="stat-label">System State:</span>
+            <span class="stat-value text-emerald">Ready</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========================================================= -->
+      <!-- TAB 2: MULTI-THREAD JOBS -->
+      <!-- ========================================================= -->
+      <section id="tab-threads" class="tab-pane">
+        <div class="pane-header">
+          <div>
+            <h2>Multi-Thread Jobs Matrix</h2>
+            <p class="text-muted">Configure, dispatch, and monitor OCR benchmark and finetuning execution across accounts.</p>
+          </div>
+          <div class="pane-actions">
+            <button id="btnOpenAddJobModal" class="btn btn-primary">Add Thread</button>
+            <button id="btnRefreshJobsStatus" class="btn btn-secondary">Refresh Status</button>
+          </div>
+        </div>
+
+        <!-- Jobs Matrix Table Card -->
+        <div class="card table-card">
+          <table class="custom-table" id="jobsTable">
+            <thead>
+              <tr>
+                <th>Job Name</th>
+                <th>Account</th>
+                <th>Kaggle Kernel ID</th>
+                <th>Type & Engines</th>
+                <th>Accelerator</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="jobsTableBody">
+              <tr><td colspan="7" class="text-center">Loading thread jobs...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ========================================================= -->
+      <!-- TAB 3: AI ASSISTANT & CHAT -->
+      <!-- ========================================================= -->
+      <section id="tab-ai-chat" class="tab-pane">
+        <div class="pane-header">
+          <div>
+            <h2>Antigravity AI Assistant</h2>
+            <p class="text-muted">Natural language command console for multi-account orchestration, automated monitoring, and log diagnostics.</p>
+          </div>
+        </div>
+
+        <!-- Suggested Prompt Pills -->
+        <div class="prompt-pills">
+          <span class="prompt-pill" data-prompt="Check GPU quota for all accounts">Check GPU Quota</span>
+          <span class="prompt-pill" data-prompt="Check current thread status">Check Thread Status</span>
+          <span class="prompt-pill" data-prompt="Run all threads">Run All Threads</span>
+          <span class="prompt-pill" data-prompt="Download results and generate summary">Download Results</span>
+          <span class="prompt-pill" data-prompt="Analyze recent error logs">Analyze Error Logs</span>
+        </div>
+
+        <!-- Chat Container -->
+        <div class="chat-container">
+          <div id="chatMessages" class="chat-messages">
+            <div class="message assistant">
+              <div class="message-bubble">
+                <p><strong>Antigravity Assistant Ready.</strong></p>
+                <p>You can execute natural language operations across your Kaggle accounts, inspect GPU quotas, run multi-threaded jobs in parallel, and troubleshoot remote execution logs.</p>
+                <p>What would you like to execute?</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="chat-input-bar">
+            <input type="text" id="chatInput" placeholder="Enter an instruction or query (e.g., 'Run all threads', 'Check GPU quota')..." />
+            <button id="btnSendChat" class="btn btn-primary">Send</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========================================================= -->
+      <!-- TAB 4: BENCHMARK ANALYTICS -->
+      <!-- ========================================================= -->
+      <section id="tab-analytics" class="tab-pane">
+        <div class="pane-header">
+          <div>
+            <h2>Benchmark Analytics & Leaderboard</h2>
+            <p class="text-muted">Head-to-head performance comparison across OCR engines on DocLayNet scientific articles.</p>
+          </div>
+          <button id="btnDownloadCSV" class="btn btn-secondary">Download CSV Report</button>
+        </div>
+
+        <!-- Charts Grid -->
+        <div class="analytics-charts-grid">
+          <div class="card chart-card">
+            <h3>Error Rates (CER & WER - Lower is better)</h3>
+            <div class="chart-wrapper">
+              <canvas id="chartErrors"></canvas>
+            </div>
+          </div>
+
+          <div class="card chart-card">
+            <h3>Throughput (Characters / Second - Higher is better)</h3>
+            <div class="chart-wrapper">
+              <canvas id="chartSpeed"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <!-- Summary Table -->
+        <div class="card table-card" style="margin-top: 20px;">
+          <h3>Aggregated Performance Metrics</h3>
+          <div id="analyticsTableContainer"></div>
+        </div>
+
+        <!-- Pretrained vs Finetuned Comparison Table -->
+        <div class="card table-card" style="margin-top: 20px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <h3 style="margin-bottom: 0;">Pretrained vs. Finetuned Head-to-Head Comparison (PaddleOCR vs. PaddleOCR-FT)</h3>
+            <span class="account-badge badge-active">10-Epochs CRNN/SVTR</span>
+          </div>
+          <p class="text-muted" style="margin-bottom: 15px; font-size: 0.85rem;">
+            Comparative analysis of baseline pretrained weights vs. fine-tuned recognition weights on DocLayNet scientific articles.
+          </p>
+          <div id="finetuneComparisonContainer"></div>
+        </div>
+
+        <!-- Finetune Pipeline Diagnostics -->
+        <div class="card table-card" style="margin-top: 20px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <h3 style="margin-bottom: 0;">Finetuning Pipeline Execution & Crop Diagnostics</h3>
+            <span class="account-badge badge-secondary">Dataset & Training Runs</span>
+          </div>
+          <p class="text-muted" style="margin-bottom: 15px; font-size: 0.85rem;">
+            Training sample extraction count, validation splits, and model export status across supported OCR engines.
+          </p>
+          <div id="finetuneStatusContainer"></div>
+        </div>
+      </section>
+
+      <!-- ========================================================= -->
+      <!-- TAB 5: LIVE LOGS & DEBUG -->
+      <!-- ========================================================= -->
+      <section id="tab-logs" class="tab-pane">
+        <div class="pane-header">
+          <div>
+            <h2>Execution Logs & Diagnostics</h2>
+            <p class="text-muted">Real-time log viewer with tail filtering and automated error traceback detection.</p>
+          </div>
+          <div class="pane-actions">
+            <select id="logFileSelect" class="custom-select">
+              <option value="">Loading log files...</option>
+            </select>
+            <select id="logTailLines" class="custom-select" style="width: 120px;">
+              <option value="50">50 lines</option>
+              <option value="100" selected>100 lines</option>
+              <option value="200">200 lines</option>
+              <option value="500">500 lines</option>
+            </select>
+            <button id="btnRefreshLog" class="btn btn-secondary">Refresh</button>
+          </div>
+        </div>
+
+        <!-- Search Bar -->
+        <div class="log-search-bar">
+          <input type="text" id="logSearchInput" placeholder="Filter log keywords (e.g., Traceback, Error, Loss, Epoch)..." />
+        </div>
+
+        <!-- Log Terminal Output View -->
+        <div class="card terminal-card">
+          <div class="terminal-header">
+            <div class="terminal-dots">
+              <span class="dot red"></span>
+              <span class="dot yellow"></span>
+              <span class="dot green"></span>
+            </div>
+            <span id="currentLogName" class="terminal-title">Console Output</span>
+          </div>
+          <pre id="logOutputContainer" class="terminal-content">Select a log file to view content...</pre>
+        </div>
+      </section>
+
+      <!-- ========================================================= -->
+      <!-- TAB 6: SETTINGS & GIT -->
+      <!-- ========================================================= -->
+      <section id="tab-settings" class="tab-pane">
+        <div class="pane-header">
+          <div>
+            <h2>Accounts Configuration & Git Sync</h2>
+            <p class="text-muted">Manage Kaggle account credentials, validate API tokens, and synchronize the repository.</p>
+          </div>
+        </div>
+
+        <div class="settings-grid">
+          <!-- Left: Add Account Form -->
+          <div class="card">
+            <h3>Add Kaggle Account</h3>
+            <form id="formAddAccount" class="custom-form">
+              <div class="form-group">
+                <label>Account ID (Unique identifier):</label>
+                <input type="text" id="newAccId" placeholder="account4, test_runner" required />
+              </div>
+              <div class="form-group">
+                <label>Kaggle Username:</label>
+                <input type="text" id="newAccUser" placeholder="username" required />
+              </div>
+              <button type="submit" class="btn btn-primary" style="width: 100%;">Add Account</button>
+            </form>
+          </div>
+
+          <!-- Right: Token Manager -->
+          <div class="card">
+            <h3>Update API Token</h3>
+            <div class="form-group">
+              <label>Select Account:</label>
+              <select id="tokenAccountSelect" class="custom-select" style="width: 100%;"></select>
+            </div>
+
+            <div class="form-group">
+              <label>Import kaggle.json file:</label>
+              <input type="file" id="fileKaggleJson" accept=".json" />
+              <button id="btnUploadKaggleJson" class="btn btn-secondary" style="margin-top: 8px; width: 100%;">Upload kaggle.json</button>
+            </div>
+
+            <div class="form-group" style="margin-top: 15px;">
+              <label>Or Paste API Key / Token Directly:</label>
+              <input type="password" id="inputApiKey" placeholder="Paste API token key..." />
+              <button id="btnSaveApiKey" class="btn btn-secondary" style="margin-top: 8px; width: 100%;">Save Token Key</button>
+            </div>
+
+            <button id="btnValidateToken" class="btn btn-accent" style="margin-top: 10px; width: 100%;">Validate Token</button>
+            <div id="tokenValidationResult" class="token-validation-box"></div>
+          </div>
+        </div>
+
+        <!-- Git Sync Section -->
+        <div class="card" style="margin-top: 20px;">
+          <h3>Git Synchronization</h3>
+          <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+            <button id="btnGitStatus" class="btn btn-secondary">Check Git Status</button>
+            <button id="btnGitPush" class="btn btn-primary">Git Push</button>
+          </div>
+          <pre id="gitStatusOutput" class="terminal-content" style="max-height: 180px;">Click 'Check Git Status' to view working tree changes...</pre>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- ========================================================= -->
+  <!-- MODAL: ADD THREAD / JOB -->
+  <!-- ========================================================= -->
+  <div id="modalAddJob" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>Configure New Thread</h3>
+        <button id="btnCloseAddJobModal" class="btn-close">✕</button>
+      </div>
+      <form id="formAddJob" class="custom-form">
+        <div class="form-group">
+          <label>Thread Name (Job Name):</label>
+          <input type="text" id="jobFormName" placeholder="finetune-paddleocr, surya-exp, docling-test" required />
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>Assigned Account:</label>
+            <select id="jobFormAccount" class="custom-select" required></select>
+          </div>
+          <div class="form-group">
+            <label>Job Type:</label>
+            <select id="jobFormType" class="custom-select">
+              <option value="benchmark">Benchmark</option>
+              <option value="finetune">Finetuning (10 Epochs)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>Hardware Accelerator:</label>
+            <select id="jobFormGpu" class="custom-select">
+              <option value="NvidiaTeslaT4">GPU Tesla T4</option>
+              <option value="NvidiaTeslaP100">GPU Tesla P100</option>
+              <option value="TPU">TPU v3-8</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Page Limit:</label>
+            <input type="number" id="jobFormLimit" value="20" min="1" max="500" />
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>OCR Engines:</label>
+          <div class="checkbox-group">
+            <label><input type="checkbox" name="engines" value="paddleocr" checked> paddleocr</label>
+            <label><input type="checkbox" name="engines" value="docling"> docling</label>
+            <label><input type="checkbox" name="engines" value="surya"> surya</label>
+            <label><input type="checkbox" name="engines" value="paddleocr_vl"> paddleocr_vl</label>
+            <label><input type="checkbox" name="engines" value="paddleocr_ft"> paddleocr_ft (Finetuned)</label>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Dependency Files (requirements):</label>
+          <input type="text" id="jobFormReqs" value="requirements-kaggle-paddleocr.txt" />
+        </div>
+
+        <div id="finetuneOptions" class="form-row" style="display: none;">
+          <div class="form-group">
+            <label>Target Finetune Model:</label>
+            <select id="jobFormFtModel" class="custom-select">
+              <option value="paddleocr">PaddleOCR Recognition</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Epochs Count:</label>
+            <input type="number" id="jobFormEpochs" value="10" min="1" max="100" />
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" id="btnCancelAddJob" class="btn btn-secondary">Cancel</button>
+          <button type="submit" class="btn btn-primary">Create Thread</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div id="toastContainer" class="toast-container"></div>
+
+  <!-- Main JavaScript App Logic -->
+  <script src="/static/app.js"></script>
+</body>
+</html>

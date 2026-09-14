@@ -1,0 +1,9 @@
+data/accounts.yaml
+data/projects.yaml
+data/tokens/**
+outputs/**
+work/**
+__pycache__/
+*.py[cod]
+.streamlit/secrets.toml
+

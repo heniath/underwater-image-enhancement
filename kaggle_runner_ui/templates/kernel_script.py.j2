@@ -1,0 +1,83 @@
+import os
+import shutil
+import subprocess
+import sys
+import traceback
+from pathlib import Path
+
+SLUG = "{{ slug }}"
+REPO_URL = "{{ repo_url }}"
+BRANCH = "{{ branch | default('feat/pcf-mbconv-fusion') }}"
+LOG_PATH = Path(f"/kaggle/working/job_debug_{SLUG}.log")
+REPO_DIR = Path("/kaggle/working/project_code")
+
+
+def write_log(message):
+    print(message, flush=True)
+    with LOG_PATH.open("a", encoding="utf-8") as f:
+        f.write(message + "\n")
+
+
+def run(command):
+    line = "+ " + " ".join(command)
+    write_log(line)
+    with LOG_PATH.open("a", encoding="utf-8") as f:
+        proc = subprocess.run(command, stdout=f, stderr=subprocess.STDOUT, text=True)
+    if proc.returncode != 0:
+        raise RuntimeError(f"Command failed with code {proc.returncode}: {line}")
+
+
+try:
+    os.chdir("/kaggle/working")
+    if REPO_DIR.exists():
+        shutil.rmtree(REPO_DIR)
+
+    clone_cmd = ["git", "clone", "--depth", "1"]
+    if BRANCH:
+        clone_cmd.extend(["--branch", BRANCH])
+    clone_cmd.extend([REPO_URL, str(REPO_DIR)])
+    run(clone_cmd)
+
+    os.chdir(REPO_DIR)
+    sys.path.insert(0, str(REPO_DIR / "src"))
+    os.environ["PYTHONPATH"] = str(REPO_DIR / "src") + os.pathsep + os.environ.get("PYTHONPATH", "")
+    write_log("PYTHONPATH=" + os.environ["PYTHONPATH"])
+
+    # Locate EUVP dataset automatically under /kaggle/input
+    candidates = [
+        Path("/kaggle/input/euvp-dataset/EUVP"),
+        Path("/kaggle/input/pamuduranasinghe/euvp-dataset/EUVP"),
+        Path("/kaggle/input/datasets/pamuduranasinghe/euvp-dataset/EUVP"),
+    ]
+    euvp_root = next((p for p in candidates if p.exists()), None)
+    if euvp_root is None:
+        matches = list(Path("/kaggle/input").glob("**/EUVP/test_samples"))
+        if matches:
+            euvp_root = matches[0].parent
+    if euvp_root is not None:
+        os.environ["EUVP_ROOT"] = str(euvp_root)
+        os.environ["DATA_ROOT"] = str(euvp_root)
+        write_log(f"EUVP dataset located at: {euvp_root}")
+    else:
+        write_log("[WARNING] EUVP dataset not directly found under /kaggle/input")
+
+{% for command in setup_commands %}
+    run({{ command }})
+{% endfor %}
+{% for command in install_commands %}
+    run({{ command }})
+{% endfor %}
+{% for command in run_commands %}
+    run({{ command }})
+{% endfor %}
+except Exception:
+    write_log("FAILED WITH TRACEBACK:")
+    write_log(traceback.format_exc())
+    raise
+finally:
+    os.chdir("/kaggle/working")
+    run([
+        "bash",
+        "-lc",
+        f"cd /kaggle/working && zip -qr {SLUG}.zip checkpoints results results_* job_debug_{SLUG}.log *.args || true",
+    ])

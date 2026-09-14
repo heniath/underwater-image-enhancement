@@ -1,0 +1,43 @@
+projects:
+- name: underwater_image_enhancement
+  repo_url: https://github.com/heniath/underwater-image-enhancement.git
+  branch: feat/pcf-mbconv-fusion
+  local_path: D:/THStudy/UniversityStudy/Research/uwir_resfes/underwater-image-enhancement
+  machine_shape: NvidiaTeslaT4
+  dataset_sources:
+  - pamuduranasinghe/euvp-dataset
+  commands:
+    setup:
+    - python -m pip install -q -e .
+    - python -m pip install -q -r requirements.txt
+    run:
+    - python train.py @{{ args_file }} --data_train_euvp $EUVP_ROOT
+  jobs:
+  - name: pcf-mbconv-5ch-euvp
+    account_id: account1
+    args_file: configs/kaggle_pcf_mbconv_5ch_euvp.args
+    description: "Proposed SOTA (5ch): Dual-Branch (RGB+UDCP & HSV-CS) + CSAGF + Rep-MBConv + HSV Loss (3.8M params, 50 ep)"
+  - name: pcf-mbconv-3ch-euvp
+    account_id: account1
+    args_file: configs/kaggle_pcf_mbconv_3ch_euvp.args
+    description: "Proposed (3ch RGB-only): Tests if HSV-CS + RGB alone outperforms 5ch without UDVP prior (3.8M params, 50 ep)"
+  - name: pcf-tiny-3ch-euvp
+    account_id: account2
+    args_file: configs/kaggle_pcf_tiny_3ch_euvp.args
+    description: "Original PCF-Net Scale: Ultra-lightweight 2-stage PixelShuffle backbone (0.09M params, 50 ep)"
+  - name: pcf-mbconv-no-hsvloss
+    account_id: account2
+    args_file: configs/kaggle_pcf_mbconv_no_hsvloss.args
+    description: "Ablation: PCF-MBConv 5ch without HSV-CS Loss (isolates architecture gain from loss gain)"
+  - name: mbconv-5ch-baseline
+    account_id: account2
+    args_file: configs/kaggle_mbconv_5ch_euvp.args
+    description: "Baseline 1: Original MBConv 5ch (3.7M params)"
+  - name: mobilenet-5ch-baseline
+    account_id: account3
+    args_file: configs/kaggle_mobilenet_5ch_euvp.args
+    description: "Baseline 2: Original MobileNetV3-Large 5ch (~6.7M params)"
+  - name: pcf-mbconv-hsv10
+    account_id: account3
+    args_file: configs/kaggle_pcf_mbconv_hsv10.args
+    description: "Ablation 2: Proposed architecture with stronger color supervision (lambda=1.0)"

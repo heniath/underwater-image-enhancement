@@ -599,6 +599,7 @@ def main():
         lambda_l1=args.L1_weight,
         lambda_perc=args.perceptual_weight,
         lambda_ssim=args.SSIM_weight,
+        lambda_hsvcs=getattr(args, "hsvcs_weight", 0.0),
         device=device,
     )
 

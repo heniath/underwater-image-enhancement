@@ -46,6 +46,8 @@ _BACKBONES = (
     "resnet",
     "mobilenet",
     "mbconv",
+    "pcf_mbconv",
+    "pcf_tiny",
     "mambavision",
     "mambaunet",
 )
@@ -205,6 +207,16 @@ def build_model(name: str, pretrained_backbone: bool = True) -> nn.Module:
         from .mbconv_unet import MBConvUNet
 
         return MBConvUNet(in_channels=in_channels)
+
+    if backbone == "pcf_mbconv":
+        from .pcf_mbconv_unet import PCFMBConvUNet
+
+        return PCFMBConvUNet(in_channels=in_channels)
+
+    if backbone == "pcf_tiny":
+        from .pcf_tiny_unet import PCFTinyUNet
+
+        return PCFTinyUNet(in_channels=in_channels)
 
     if backbone == "mambavision":
         from .mambavision_unet import MambaVisionUNet

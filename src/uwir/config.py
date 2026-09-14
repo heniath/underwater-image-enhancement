@@ -337,6 +337,14 @@ def option():
         default=0.0,
         help="lambda_3 SSIM loss weight",
     )
+    parser.add_argument(
+        "--hsvcs-weight",
+        "--hsvcs_weight",
+        dest="hsvcs_weight",
+        type=float,
+        default=0.0,
+        help="lambda_4 HSV-CS loss weight (PCF-Net)",
+    )
 
     # ------------------------------------------------------------------
     # Training dataset paths

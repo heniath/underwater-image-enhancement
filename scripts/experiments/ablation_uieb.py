@@ -170,6 +170,7 @@ def _make_parser() -> argparse.ArgumentParser:
     p.add_argument("--L1_weight",            type=float, default=1.0)
     p.add_argument("--perceptual_weight",    type=float, default=1.0)
     p.add_argument("--SSIM_weight",          type=float, default=0.0)
+    p.add_argument("--hsvcs_weight",         type=float, default=0.0)
 
     # Multi-run
     p.add_argument(
@@ -259,6 +260,7 @@ def train_one_run(
         lambda_l1=args.L1_weight,
         lambda_perc=args.perceptual_weight,
         lambda_ssim=args.SSIM_weight,
+        lambda_hsvcs=getattr(args, "hsvcs_weight", 0.0),
         device=device,
     )
     optimizer = torch.optim.Adam(

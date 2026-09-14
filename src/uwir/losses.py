@@ -105,20 +105,76 @@ class SSIMLoss(nn.Module):
 
 
 # ---------------------------------------------------------------------------
+# HSV-CS Loss (PCF-Net)
+# ---------------------------------------------------------------------------
+
+
+class HSVCSLoss(nn.Module):
+    """
+    HSV-CS Loss from PCF-Net (Remote Sensing 2026):
+        L_hsvcs = λ_h · L_hue + λ_sv · L_sv
+
+    where:
+        L_hue = 1 − (H_Cx · H_Cy + H_Sx · H_Sy)   (cosine distance on unit circle)
+        L_sv  = |V_x · S_x − V_y · S_y|             (saturation-value coupling)
+
+    Args:
+        lambda_h  (float): Weight for hue angular distance. Default: 1.0.
+        lambda_sv (float): Weight for saturation-value coupling. Default: 1.0.
+    """
+
+    def __init__(self, lambda_h: float = 1.0, lambda_sv: float = 1.0):
+        super().__init__()
+        self.lambda_h = lambda_h
+        self.lambda_sv = lambda_sv
+
+    def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            pred   (Tensor): (N, 3, H, W) model output in [0, 1].
+            target (Tensor): (N, 3, H, W) ground truth in [0, 1].
+
+        Returns:
+            Tensor: scalar HSV-CS loss.
+        """
+        from .models.pcf_modules import rgb_to_hsv_cs
+
+        pred_hsv = rgb_to_hsv_cs(pred.clamp(0, 1))
+        tgt_hsv = rgb_to_hsv_cs(target.clamp(0, 1))
+
+        # Re-scale H_C, H_S from [0, 1] back to [-1, 1] for unit circle cosine
+        hc_x = 2.0 * pred_hsv[:, 0:1, :, :] - 1.0
+        hs_x = 2.0 * pred_hsv[:, 1:2, :, :] - 1.0
+        hc_y = 2.0 * tgt_hsv[:, 0:1, :, :] - 1.0
+        hs_y = 2.0 * tgt_hsv[:, 1:2, :, :] - 1.0
+
+        # Cosine distance on the unit circle
+        l_hue = torch.mean(1.0 - (hc_x * hc_y + hs_x * hs_y))
+
+        # Saturation-Value coupling
+        s_x, v_x = pred_hsv[:, 2:3, :, :], pred_hsv[:, 3:4, :, :]
+        s_y, v_y = tgt_hsv[:, 2:3, :, :], tgt_hsv[:, 3:4, :, :]
+        l_sv = F.l1_loss(v_x * s_x, v_y * s_y)
+
+        return self.lambda_h * l_hue + self.lambda_sv * l_sv
+
+
+# ---------------------------------------------------------------------------
 # Composite Loss
 # ---------------------------------------------------------------------------
 
 
 class CompositeLoss(nn.Module):
     """
-    Weighted combination of L1, VGG perceptual, and SSIM losses:
+    Weighted combination of L1, VGG perceptual, SSIM, and HSV-CS losses:
 
-        loss = λ_l1 · L1 + λ_perc · Perceptual + λ_ssim · SSIM
+        loss = λ_l1 · L1 + λ_perc · Perceptual + λ_ssim · SSIM + λ_hsvcs · HSVCS
 
     Args:
-        lambda_l1   (float): Weight for L1 loss.           Default: 1.0.
-        lambda_perc (float): Weight for perceptual loss.   Default: 0.1.
-        lambda_ssim (float): Weight for SSIM loss.         Default: 0.5.
+        lambda_l1    (float): Weight for L1 loss.           Default: 1.0.
+        lambda_perc  (float): Weight for perceptual loss.   Default: 0.1.
+        lambda_ssim  (float): Weight for SSIM loss.         Default: 0.5.
+        lambda_hsvcs (float): Weight for HSV-CS loss.       Default: 0.0.
         device (str | torch.device): Device for VGG backbone.
     """
 
@@ -127,16 +183,19 @@ class CompositeLoss(nn.Module):
         lambda_l1: float = 1.0,
         lambda_perc: float = 0.1,
         lambda_ssim: float = 0.5,
+        lambda_hsvcs: float = 0.0,
         device: str | torch.device = "cpu",
     ):
         super().__init__()
         self.lambda_l1 = lambda_l1
         self.lambda_perc = lambda_perc
         self.lambda_ssim = lambda_ssim
+        self.lambda_hsvcs = lambda_hsvcs
 
         self.l1 = nn.L1Loss()
         self.perc = VGGPerceptualLoss(device) if lambda_perc else None
         self.ssim = SSIMLoss() if lambda_ssim else None
+        self.hsvcs = HSVCSLoss() if lambda_hsvcs else None
 
     def forward(
         self,
@@ -152,18 +211,25 @@ class CompositeLoss(nn.Module):
             total (Tensor): Scalar combined loss.
             parts (dict):   Per-component losses as Python floats
                             with keys ``"l1"``, ``"perceptual"``,
-                            ``"ssim_loss"``, ``"total"``.
+                            ``"ssim_loss"``, ``"hsvcs"``, ``"total"``.
         """
         l_l1 = self.l1(pred, target)
         l_perc = self.perc(pred, target) if self.perc is not None else pred.new_zeros(())
         l_ssim = self.ssim(pred, target) if self.ssim is not None else pred.new_zeros(())
+        l_hsvcs = self.hsvcs(pred, target) if self.hsvcs is not None else pred.new_zeros(())
 
-        total = self.lambda_l1 * l_l1 + self.lambda_perc * l_perc + self.lambda_ssim * l_ssim
+        total = (
+            self.lambda_l1 * l_l1
+            + self.lambda_perc * l_perc
+            + self.lambda_ssim * l_ssim
+            + self.lambda_hsvcs * l_hsvcs
+        )
 
         parts = {
             "l1": l_l1.item(),
             "perceptual": l_perc.item(),
             "ssim_loss": l_ssim.item(),
+            "hsvcs": l_hsvcs.item(),
             "total": total.item(),
         }
         return total, parts

@@ -1,0 +1,41 @@
+# Kaggle run config: PCF-MBConv U-Net Ablation 2 (Stronger HSV-CS Loss lambda=1.0)
+# Evaluates sensitivity to higher chromaticity and value supervision on the unit circle.
+# Usage:
+# python train.py @configs/kaggle_pcf_mbconv_hsv10.args --data_train_euvp /kaggle/input/euvp-dataset/EUVP
+
+--model pcf_mbconv_5ch
+--dataset euvp
+--euvp_subset all
+--pretrained_backbone False
+
+# Training settings
+--batchSize 16
+--cropSize 256
+--nEpochs 200
+--lr 1e-4
+--weight_decay 1e-5
+--snapshots 10
+--early_stop_patience 20
+
+# Learning rate scheduler
+--cos_restart False
+--cos_restart_cyclic False
+--scheduler_step 30
+--scheduler_gamma 0.5
+--start_warmup False
+--warmup_epochs 0
+
+# Multi-objective Loss settings: 1*L1 + 1*LPIPS + 1.0*HSV-CS
+--L1_weight 1.0
+--perceptual_weight 1.0
+--SSIM_weight 0.0
+--hsvcs_weight 1.0
+
+# Kaggle-friendly runtime/output settings
+--gpu_mode True
+--num_gpus 1
+--threads 2
+--in_memory False
+--checkpoint_dir /kaggle/working/checkpoints
+--val_folder /kaggle/working/results
+--run_name pcf_mbconv_hsv10

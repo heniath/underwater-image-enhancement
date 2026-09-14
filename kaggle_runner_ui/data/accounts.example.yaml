@@ -1,0 +1,10 @@
+accounts:
+- id: account1
+  username: thung192
+  token_dir: data/tokens/account1
+- id: account2
+  username: TThanh13
+  token_dir: data/tokens/account2
+- id: account3
+  username: RaH1111
+  token_dir: data/tokens/account3
