@@ -7,8 +7,9 @@
 --euvp_subset all
 --pretrained_backbone False
 
-# Training settings (Fast screen: 50 epochs)
---batchSize 16
+# Training settings (Fast screen: 50 epochs, batch 8x2=16 for VRAM safety)
+--batchSize 8
+--grad_accumulation_steps 2
 --cropSize 256
 --nEpochs 50
 --lr 1e-4

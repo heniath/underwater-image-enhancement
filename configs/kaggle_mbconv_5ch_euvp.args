@@ -1,9 +1,9 @@
-# Kaggle run config: PCF-MBConv U-Net Ablation 2 (Stronger HSV-CS Loss lambda=1.0)
-# Evaluates sensitivity to higher chromaticity and value supervision on the unit circle.
+# Kaggle run config: MBConv 5-channel baseline on EUVP
+# Fast screening setup: 50 epochs, 1 seed.
 # Usage:
-# python train.py @configs/kaggle_pcf_mbconv_hsv10.args --data_train_euvp /kaggle/input/euvp-dataset/EUVP
+# python train.py @configs/kaggle_mbconv_5ch_euvp.args --data_train_euvp /kaggle/input/euvp-dataset/EUVP
 
---model pcf_mbconv_5ch
+--model mbconv_5ch
 --dataset euvp
 --euvp_subset all
 --pretrained_backbone False
@@ -15,22 +15,22 @@
 --nEpochs 50
 --lr 1e-4
 --weight_decay 1e-5
---snapshots 10
---early_stop_patience 20
+--snapshots 5
+--early_stop_patience 15
 
 # Learning rate scheduler
 --cos_restart False
 --cos_restart_cyclic False
---scheduler_step 30
+--scheduler_step 20
 --scheduler_gamma 0.5
 --start_warmup False
 --warmup_epochs 0
 
-# Multi-objective Loss settings: 1*L1 + 1*LPIPS + 1.0*HSV-CS
+# Loss settings: 1*L1 + 1*LPIPS
 --L1_weight 1.0
 --perceptual_weight 1.0
 --SSIM_weight 0.0
---hsvcs_weight 1.0
+--hsvcs_weight 0.0
 
 # Kaggle-friendly runtime/output settings
 --gpu_mode True
@@ -39,4 +39,4 @@
 --in_memory False
 --checkpoint_dir /kaggle/working/checkpoints
 --val_folder /kaggle/working/results
---run_name pcf_mbconv_hsv10
+--run_name mbconv_5ch_baseline

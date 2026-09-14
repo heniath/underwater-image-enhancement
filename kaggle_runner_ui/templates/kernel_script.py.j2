@@ -43,6 +43,7 @@ try:
     os.chdir(REPO_DIR)
     sys.path.insert(0, str(REPO_DIR / "src"))
     os.environ["PYTHONPATH"] = str(REPO_DIR / "src") + os.pathsep + os.environ.get("PYTHONPATH", "")
+    os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
     write_log("PYTHONPATH=" + os.environ["PYTHONPATH"])
 
     # Locate EUVP dataset automatically under /kaggle/input

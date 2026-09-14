@@ -7,10 +7,11 @@
 --euvp_subset all
 --pretrained_backbone True
 
-# Original training defaults, written here so the branch is reproducible.
---batchSize 16
+# Fast screen settings: 50 epochs, batch 8x2=16
+--batchSize 8
+--grad_accumulation_steps 2
 --cropSize 256
---nEpochs 200
+--nEpochs 50
 --lr 1e-4
 --weight_decay 1e-5
 --snapshots 10

@@ -506,6 +506,8 @@ def option():
     )
     parser.add_argument(
         "--grad-accumulation-steps",
+        "--grad_accumulation_steps",
+        dest="grad_accumulation_steps",
         type=int,
         default=1,
         help="Accumulate this many mini-batches before each optimizer step",
