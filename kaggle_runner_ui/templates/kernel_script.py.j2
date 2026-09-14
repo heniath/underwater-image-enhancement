@@ -19,10 +19,12 @@ def write_log(message):
 
 
 def run(command):
-    line = "+ " + " ".join(command)
+    if isinstance(command, list):
+        command = [os.path.expandvars(str(arg)) for arg in command]
+    line = "+ " + (" ".join(command) if isinstance(command, list) else str(command))
     write_log(line)
     with LOG_PATH.open("a", encoding="utf-8") as f:
-        proc = subprocess.run(command, stdout=f, stderr=subprocess.STDOUT, text=True)
+        proc = subprocess.run(command, stdout=f, stderr=subprocess.STDOUT, text=True, shell=isinstance(command, str))
     if proc.returncode != 0:
         raise RuntimeError(f"Command failed with code {proc.returncode}: {line}")
 
