@@ -50,6 +50,9 @@ _BACKBONES = (
     "pcf_tiny",
     "mambavision",
     "mambaunet",
+    "lite_enhancenet",
+    "plite",
+    "plcs_lite",
 )
 
 _FUSION_BACKBONES = ("fusionunet", "asppfusion", "denseasppfusion")
@@ -227,6 +230,21 @@ def build_model(name: str, pretrained_backbone: bool = True) -> nn.Module:
         from .mamba_unet import MambaUNet
 
         return MambaUNet(in_channels=in_channels)
+
+    if backbone == "lite_enhancenet":
+        from .lite_enhancenet import LiteEnhanceNet
+
+        return LiteEnhanceNet(in_channels=in_channels)
+
+    if backbone == "plite":
+        from .plite_net import PLiteNet
+
+        return PLiteNet(in_channels=in_channels)
+
+    if backbone == "plcs_lite":
+        from .plcs_lite import PLCSLite
+
+        return PLCSLite(in_channels=in_channels)
 
     # Should never reach here due to parse_model_variant guard
     raise ValueError(f"Unknown backbone: {backbone}")

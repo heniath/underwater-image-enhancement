@@ -4,7 +4,7 @@
 
 --model pcf_tiny_3ch
 --dataset euvp
---euvp_subset all
+--euvp_subset underwater_scenes
 --pretrained_backbone False
 
 # Training settings (Fast screen: 50 epochs)

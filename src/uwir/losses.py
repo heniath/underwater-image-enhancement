@@ -184,6 +184,7 @@ class CompositeLoss(nn.Module):
         lambda_perc: float = 0.1,
         lambda_ssim: float = 0.5,
         lambda_hsvcs: float = 0.0,
+        lambda_redeg: float = 0.0,
         device: str | torch.device = "cpu",
     ):
         super().__init__()
@@ -191,6 +192,7 @@ class CompositeLoss(nn.Module):
         self.lambda_perc = lambda_perc
         self.lambda_ssim = lambda_ssim
         self.lambda_hsvcs = lambda_hsvcs
+        self.lambda_redeg = lambda_redeg
 
         self.l1 = nn.L1Loss()
         self.perc = VGGPerceptualLoss(device) if lambda_perc else None
@@ -199,24 +201,33 @@ class CompositeLoss(nn.Module):
 
     def forward(
         self,
-        pred: torch.Tensor,
+        pred: torch.Tensor | tuple,
         target: torch.Tensor,
+        input_image: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, dict[str, float]]:
         """
         Args:
-            pred   (Tensor): (N, 3, H, W) model output in [0, 1].
-            target (Tensor): (N, 3, H, W) ground truth in [0, 1].
+            pred   (Tensor | tuple): (N, 3, H, W) model output in [0, 1], or
+                                    tuple (J, I_redeg, t, B) from physical models.
+            target (Tensor):        (N, 3, H, W) ground truth in [0, 1].
+            input_image (Tensor):   Optional (N, 3, H, W) input image for re-degradation loss.
 
         Returns:
             total (Tensor): Scalar combined loss.
-            parts (dict):   Per-component losses as Python floats
-                            with keys ``"l1"``, ``"perceptual"``,
-                            ``"ssim_loss"``, ``"hsvcs"``, ``"total"``.
+            parts (dict):   Per-component losses as Python floats.
         """
-        l_l1 = self.l1(pred, target)
-        l_perc = self.perc(pred, target) if self.perc is not None else pred.new_zeros(())
-        l_ssim = self.ssim(pred, target) if self.ssim is not None else pred.new_zeros(())
-        l_hsvcs = self.hsvcs(pred, target) if self.hsvcs is not None else pred.new_zeros(())
+        i_redeg = None
+        if isinstance(pred, (tuple, list)):
+            j_pred = pred[0]
+            if len(pred) > 1:
+                i_redeg = pred[1]
+        else:
+            j_pred = pred
+
+        l_l1 = self.l1(j_pred, target)
+        l_perc = self.perc(j_pred, target) if self.perc is not None else j_pred.new_zeros(())
+        l_ssim = self.ssim(j_pred, target) if self.ssim is not None else j_pred.new_zeros(())
+        l_hsvcs = self.hsvcs(j_pred, target) if self.hsvcs is not None else j_pred.new_zeros(())
 
         total = (
             self.lambda_l1 * l_l1
@@ -230,6 +241,15 @@ class CompositeLoss(nn.Module):
             "perceptual": l_perc.item(),
             "ssim_loss": l_ssim.item(),
             "hsvcs": l_hsvcs.item(),
-            "total": total.item(),
         }
+
+        if self.lambda_redeg > 0 and i_redeg is not None and input_image is not None:
+            inp_rgb = input_image[:, :3, :, :] if input_image.shape[1] > 3 else input_image
+            l_redeg = self.l1(i_redeg, inp_rgb)
+            if self.ssim is not None:
+                l_redeg = l_redeg + 0.5 * self.ssim(i_redeg, inp_rgb)
+            total = total + self.lambda_redeg * l_redeg
+            parts["redeg"] = l_redeg.item()
+
+        parts["total"] = total.item()
         return total, parts

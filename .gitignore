@@ -31,3 +31,4 @@ datasets.zip
 .coverage
 dist/
 build/
+scratch/

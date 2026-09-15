@@ -307,7 +307,7 @@ def train_epoch(
         amp_enabled = scaler is not None and scaler.is_enabled()
         with torch.autocast(device_type=device.type, enabled=amp_enabled):
             pred = model(inp)
-            loss, parts = criterion(pred, gt)
+            loss, parts = criterion(pred, gt, input_image=inp)
         if not torch.isfinite(loss):
             raise FloatingPointError(
                 f"Non-finite training loss at batch {batch_idx + 1}: {loss.item()}"
