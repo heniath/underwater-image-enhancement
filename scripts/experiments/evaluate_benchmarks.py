@@ -65,8 +65,9 @@ def auto_detect_paths() -> Tuple[Optional[Path], Optional[Path], Optional[Path],
     """
     Detects checkpoint_dir, euvp_root, uieb_raw_dir, uieb_ref_dir across local and Kaggle environments.
     """
-    # 1. Checkpoints
     ckpt_candidates = [
+        Path("/kaggle/input/datasets/thung192/uwir-trained-checkpoints"),
+        Path("/kaggle/input/datasets/uwir-trained-checkpoints"),
         Path("/kaggle/input/uwir-trained-checkpoints"),
         Path("/kaggle/input/thung192/uwir-trained-checkpoints"),
         _REPO_ROOT / "scratch" / "uwir_checkpoints_dataset",
@@ -74,6 +75,10 @@ def auto_detect_paths() -> Tuple[Optional[Path], Optional[Path], Optional[Path],
         _REPO_ROOT / "kaggle_runner_ui" / "outputs" / "underwater_image_enhancement",
     ]
     ckpt_dir = find_first_existing(ckpt_candidates)
+    if ckpt_dir is None:
+        matches = list(Path("/kaggle/input").glob("**/best_model.pth"))
+        if matches:
+            ckpt_dir = matches[0].parent.parent
 
     # 2. EUVP Dark
     euvp_candidates = [
@@ -307,14 +312,20 @@ def main():
 
     # 4. Find all checkpoints to evaluate
     all_runs = {}
+    found_ckpts = []
     if ckpt_dir and ckpt_dir.exists():
         found_ckpts = list(ckpt_dir.rglob("best_model.pth"))
-        print(f"\n  Found {len(found_ckpts)} checkpoints under {ckpt_dir}:")
+    if not found_ckpts:
+        found_ckpts = list(Path("/kaggle/input").glob("**/best_model.pth"))
+    if not found_ckpts and (_REPO_ROOT / "scratch" / "uwir_checkpoints_dataset").exists():
+        found_ckpts = list((_REPO_ROOT / "scratch" / "uwir_checkpoints_dataset").rglob("best_model.pth"))
+
+    if found_ckpts:
+        print(f"\n  Found {len(found_ckpts)} checkpoints:")
         for p in found_ckpts:
             print(f"    * {p.parent.name} -> {p}")
     else:
-        print(f"\n  [WARN] Checkpoint directory does not exist: {ckpt_dir}")
-        found_ckpts = []
+        print(f"\n  [WARN] No checkpoints found!")
 
     results_table = []
 
