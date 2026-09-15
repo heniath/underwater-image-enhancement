@@ -1,39 +1,39 @@
 # Kaggle run config: M20566-LMF 3-channel (~91k params)
 # Variant 1: Forward Optical Degradation Re-synthesis & Cycle Style Learning
-# Usage:
-# python train.py @configs/kaggle_m20566_lmf_3ch.args --data_train_euvp $EUVP_ROOT
+# Zero-initialized residual projection for high starting PSNR
 
 --model m20566_lmf_3ch
 --dataset euvp
 --euvp_subset underwater_scenes
 --pretrained_backbone False
 
-# Training settings (Fast screen: 50 epochs)
+# Training settings (50 epochs, patience 20)
 --batchSize 16
 --cropSize 256
 --nEpochs 50
 --lr 1e-4
 --weight_decay 1e-5
 --snapshots 5
---early_stop_patience 15
+--early_stop_patience 20
 
 # Learning rate scheduler
 --cos_restart False
 --cos_restart_cyclic False
---scheduler_step 20
+--scheduler_step 25
 --scheduler_gamma 0.5
 --start_warmup False
 --warmup_epochs 0
 
-# Composite Loss: 0.8*L1 + 0.2*MSE + 1.0*SSIM + 0.004*Hue + 0.01*SV + 0.5*ReDeg
---L1_weight 0.8
---MSE_weight 0.2
---SSIM_weight 1.0
---perceptual_weight 0.0
---hsvcs_weight 1.0
+# High-PSNR Composite Loss + ReDeg:
+# 1.0*L1 + 1.0*MSE + 0.5*Perceptual + 0.2*SSIM + 0.5*HSVCS + 0.2*ReDeg
+--L1_weight 1.0
+--MSE_weight 1.0
+--perceptual_weight 0.5
+--SSIM_weight 0.2
+--hsvcs_weight 0.5
 --hue_weight 0.004
 --sv_weight 0.01
---redeg_weight 0.5
+--redeg_weight 0.2
 
 # Kaggle-friendly runtime/output settings
 --gpu_mode True

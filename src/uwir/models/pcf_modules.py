@@ -26,6 +26,7 @@ def rgb_to_hsv_cs(x: torch.Tensor, eps: float = 1e-7) -> torch.Tensor:
     """
     Convert an RGB tensor in [0, 1] to the stabilized 4-channel HSV-CS representation:
     (H_C, H_S, S, V), all scaled to [0, 1].
+    Evaluated in float32 to prevent gradient overflow in mixed-precision (AMP).
 
     Args:
         x: Input tensor of shape (B, 3, H, W) in range [0, 1].
@@ -34,6 +35,9 @@ def rgb_to_hsv_cs(x: torch.Tensor, eps: float = 1e-7) -> torch.Tensor:
     Returns:
         Tensor of shape (B, 4, H, W) where channels are (H_C, H_S, S, V).
     """
+    orig_dtype = x.dtype
+    x = x.float()
+
     r = x[:, 0:1, :, :]
     g = x[:, 1:2, :, :]
     b = x[:, 2:3, :, :]
@@ -45,11 +49,12 @@ def rgb_to_hsv_cs(x: torch.Tensor, eps: float = 1e-7) -> torch.Tensor:
     # Value (V) in [0, 1]
     v = max_c
 
-    # For achromatic pixels (gray/black/white where delta is ~0), hue and saturation are undefined.
-    # We use a threshold to prevent gradient explosion from dividing by tiny numbers.
+    # Protect gradient computation with clamp to prevent inf gradients
+    safe_delta = torch.clamp(delta, min=1e-4)
+    safe_max_c = torch.clamp(max_c, min=1e-4)
     is_chromatic = (delta >= 1e-4)
-    safe_delta = torch.where(is_chromatic, delta, torch.ones_like(delta))
-    s = torch.where(max_c > 1e-4, delta / torch.clamp(max_c, min=1e-4), torch.zeros_like(delta))
+
+    s = torch.where(max_c > 1e-4, delta / safe_max_c, torch.zeros_like(delta))
 
     # Masks for which channel is max
     is_r = (max_c == r)
@@ -70,7 +75,8 @@ def rgb_to_hsv_cs(x: torch.Tensor, eps: float = 1e-7) -> torch.Tensor:
     h_c = (torch.cos(h_rad) + 1.0) * 0.5
     h_s = (torch.sin(h_rad) + 1.0) * 0.5
 
-    return torch.cat([h_c, h_s, s, v], dim=1)
+    out = torch.cat([h_c, h_s, s, v], dim=1)
+    return out.to(orig_dtype)
 
 
 # ---------------------------------------------------------------------------

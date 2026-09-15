@@ -116,6 +116,9 @@ class SSIMLoss(nn.Module):
         Returns:
             Tensor: scalar loss ∈ [0, 2].
         """
+        pred = pred.float()
+        target = target.float()
+
         if self._kornia is not None:
             ssim_map = self._kornia.metrics.ssim(pred, target, self.window_size)
             return 1.0 - ssim_map.mean()
@@ -172,8 +175,10 @@ class HSVCSLoss(nn.Module):
         """
         from .models.pcf_modules import rgb_to_hsv_cs
 
-        pred_hsv = rgb_to_hsv_cs(pred.clamp(0, 1))
-        tgt_hsv = rgb_to_hsv_cs(target.clamp(0, 1))
+        pred_f = pred.float().clamp(0.0, 1.0)
+        tgt_f = target.float().clamp(0.0, 1.0)
+        pred_hsv = rgb_to_hsv_cs(pred_f)
+        tgt_hsv = rgb_to_hsv_cs(tgt_f)
 
         # Re-scale H_C, H_S from [0, 1] back to [-1, 1] for unit circle cosine
         hc_x = 2.0 * pred_hsv[:, 0:1, :, :] - 1.0

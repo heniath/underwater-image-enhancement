@@ -201,6 +201,10 @@ class M20566RepLight(nn.Module):
 
         # 6. Residual Output Head
         self.head = nn.Conv2d(c, out_channels, kernel_size=1)
+        # Zero-initialize so initial output is the exact identity J = I (Delta = 0)
+        nn.init.zeros_(self.head.weight)
+        if self.head.bias is not None:
+            nn.init.zeros_(self.head.bias)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if x.shape[1] < self.in_channels:
