@@ -75,10 +75,24 @@ class VGGPerceptualLoss(nn.Module):
 # ---------------------------------------------------------------------------
 
 
+def _fspecial_gauss_1d(size: int, sigma: float) -> torch.Tensor:
+    coords = torch.arange(size, dtype=torch.float)
+    coords -= size // 2
+    g = torch.exp(-(coords ** 2) / (2 * sigma ** 2))
+    return g / g.sum()
+
+
+def _gaussian_filter(x: torch.Tensor, win_1d: torch.Tensor) -> torch.Tensor:
+    channels = x.shape[1]
+    win_2d = torch.outer(win_1d, win_1d).view(1, 1, win_1d.shape[0], win_1d.shape[0]).repeat(channels, 1, 1, 1).to(x.device, x.dtype)
+    pad = win_1d.shape[0] // 2
+    return F.conv2d(x, win_2d, padding=pad, groups=channels)
+
+
 class SSIMLoss(nn.Module):
     """
     SSIM-based loss: ``1 − mean(SSIM map)``.
-    Uses ``kornia.metrics.ssim`` which returns the per-pixel SSIM map.
+    Uses ``kornia.metrics.ssim`` if available, with pure-PyTorch fallback.
 
     Args:
         window_size (int): Gaussian window size. Default: 11.
@@ -87,9 +101,11 @@ class SSIMLoss(nn.Module):
     def __init__(self, window_size: int = 11):
         super().__init__()
         self.window_size = window_size
-        import kornia
-
-        self._kornia = kornia
+        try:
+            import kornia
+            self._kornia = kornia
+        except ImportError:
+            self._kornia = None
 
     def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         """
@@ -100,7 +116,24 @@ class SSIMLoss(nn.Module):
         Returns:
             Tensor: scalar loss ∈ [0, 2].
         """
-        ssim_map = self._kornia.metrics.ssim(pred, target, self.window_size)
+        if self._kornia is not None:
+            ssim_map = self._kornia.metrics.ssim(pred, target, self.window_size)
+            return 1.0 - ssim_map.mean()
+
+        # Pure PyTorch fallback
+        c1 = 0.01 ** 2
+        c2 = 0.03 ** 2
+        win_1d = _fspecial_gauss_1d(self.window_size, 1.5)
+        mu1 = _gaussian_filter(pred, win_1d)
+        mu2 = _gaussian_filter(target, win_1d)
+        mu1_sq = mu1.pow(2)
+        mu2_sq = mu2.pow(2)
+        mu1_mu2 = mu1 * mu2
+        sigma1_sq = _gaussian_filter(pred * pred, win_1d) - mu1_sq
+        sigma2_sq = _gaussian_filter(target * target, win_1d) - mu2_sq
+        sigma12 = _gaussian_filter(pred * target, win_1d) - mu1_mu2
+        cs_map = (2 * sigma12 + c2) / (sigma1_sq + sigma2_sq + c2)
+        ssim_map = ((2 * mu1_mu2 + c1) / (mu1_sq + mu2_sq + c1)) * cs_map
         return 1.0 - ssim_map.mean()
 
 
@@ -166,38 +199,47 @@ class HSVCSLoss(nn.Module):
 
 class CompositeLoss(nn.Module):
     """
-    Weighted combination of L1, VGG perceptual, SSIM, and HSV-CS losses:
+    Weighted combination of L1, MSE, VGG perceptual, SSIM, and HSV-CS losses:
 
-        loss = λ_l1 · L1 + λ_perc · Perceptual + λ_ssim · SSIM + λ_hsvcs · HSVCS
+        loss = λ_l1 · L1 + λ_mse · MSE + λ_perc · Perceptual + λ_ssim · SSIM + λ_hsvcs · HSVCS + λ_redeg · ReDeg
 
     Args:
         lambda_l1    (float): Weight for L1 loss.           Default: 1.0.
+        lambda_mse   (float): Weight for MSE loss.          Default: 0.0.
         lambda_perc  (float): Weight for perceptual loss.   Default: 0.1.
         lambda_ssim  (float): Weight for SSIM loss.         Default: 0.5.
         lambda_hsvcs (float): Weight for HSV-CS loss.       Default: 0.0.
+        lambda_hue   (float): Weight for Hue loss.          Default: 1.0.
+        lambda_sv    (float): Weight for SV loss.           Default: 1.0.
+        lambda_redeg (float): Weight for re-degradation.    Default: 0.0.
         device (str | torch.device): Device for VGG backbone.
     """
 
     def __init__(
         self,
         lambda_l1: float = 1.0,
+        lambda_mse: float = 0.0,
         lambda_perc: float = 0.1,
         lambda_ssim: float = 0.5,
         lambda_hsvcs: float = 0.0,
+        lambda_hue: float = 1.0,
+        lambda_sv: float = 1.0,
         lambda_redeg: float = 0.0,
         device: str | torch.device = "cpu",
     ):
         super().__init__()
         self.lambda_l1 = lambda_l1
+        self.lambda_mse = lambda_mse
         self.lambda_perc = lambda_perc
         self.lambda_ssim = lambda_ssim
         self.lambda_hsvcs = lambda_hsvcs
         self.lambda_redeg = lambda_redeg
 
         self.l1 = nn.L1Loss()
+        self.mse = nn.MSELoss() if lambda_mse else None
         self.perc = VGGPerceptualLoss(device) if lambda_perc else None
         self.ssim = SSIMLoss() if lambda_ssim else None
-        self.hsvcs = HSVCSLoss() if lambda_hsvcs else None
+        self.hsvcs = HSVCSLoss(lambda_h=lambda_hue, lambda_sv=lambda_sv) if lambda_hsvcs else None
 
     def forward(
         self,
@@ -225,12 +267,14 @@ class CompositeLoss(nn.Module):
             j_pred = pred
 
         l_l1 = self.l1(j_pred, target)
+        l_mse = self.mse(j_pred, target) if self.mse is not None else j_pred.new_zeros(())
         l_perc = self.perc(j_pred, target) if self.perc is not None else j_pred.new_zeros(())
         l_ssim = self.ssim(j_pred, target) if self.ssim is not None else j_pred.new_zeros(())
         l_hsvcs = self.hsvcs(j_pred, target) if self.hsvcs is not None else j_pred.new_zeros(())
 
         total = (
             self.lambda_l1 * l_l1
+            + self.lambda_mse * l_mse
             + self.lambda_perc * l_perc
             + self.lambda_ssim * l_ssim
             + self.lambda_hsvcs * l_hsvcs
@@ -238,6 +282,7 @@ class CompositeLoss(nn.Module):
 
         parts = {
             "l1": l_l1.item(),
+            "mse": l_mse.item(),
             "perceptual": l_perc.item(),
             "ssim_loss": l_ssim.item(),
             "hsvcs": l_hsvcs.item(),

@@ -345,6 +345,38 @@ def option():
         default=0.0,
         help="lambda_4 HSV-CS loss weight (PCF-Net)",
     )
+    parser.add_argument(
+        "--mse-weight",
+        "--MSE_weight",
+        dest="MSE_weight",
+        type=float,
+        default=0.0,
+        help="MSE loss weight",
+    )
+    parser.add_argument(
+        "--redeg-weight",
+        "--redeg_weight",
+        dest="redeg_weight",
+        type=float,
+        default=0.0,
+        help="LMF forward optical re-degradation loss weight",
+    )
+    parser.add_argument(
+        "--hue-weight",
+        "--hue_weight",
+        dest="hue_weight",
+        type=float,
+        default=1.0,
+        help="HSV-CS hue component weight",
+    )
+    parser.add_argument(
+        "--sv-weight",
+        "--sv_weight",
+        dest="sv_weight",
+        type=float,
+        default=1.0,
+        help="HSV-CS SV component weight",
+    )
 
     # ------------------------------------------------------------------
     # Training dataset paths

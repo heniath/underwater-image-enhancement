@@ -407,7 +407,7 @@ def val_loss_epoch(model, loader, criterion, device, amp_enabled: bool = False):
         gt = gt.to(device, non_blocking=True)
         with torch.autocast(device_type=device.type, enabled=amp_enabled):
             pred = model(inp)
-            loss, _ = criterion(pred, gt)
+            loss, _ = criterion(pred, gt, input_image=inp)
         if not torch.isfinite(loss):
             raise FloatingPointError(
                 f"Non-finite validation loss at batch {batch_idx + 1}: {loss.item()}"
@@ -597,9 +597,13 @@ def main():
     # ------------------------------------------------------------------
     criterion = CompositeLoss(
         lambda_l1=args.L1_weight,
+        lambda_mse=getattr(args, "MSE_weight", 0.0),
         lambda_perc=args.perceptual_weight,
         lambda_ssim=args.SSIM_weight,
         lambda_hsvcs=getattr(args, "hsvcs_weight", 0.0),
+        lambda_hue=getattr(args, "hue_weight", 1.0),
+        lambda_sv=getattr(args, "sv_weight", 1.0),
+        lambda_redeg=getattr(args, "redeg_weight", 0.0),
         device=device,
     )
 

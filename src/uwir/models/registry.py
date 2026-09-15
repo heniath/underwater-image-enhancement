@@ -53,6 +53,9 @@ _BACKBONES = (
     "lite_enhancenet",
     "plite",
     "plcs_lite",
+    "m20566_replight",
+    "m20566_lmf",
+    "m20566_lcs",
 )
 
 _FUSION_BACKBONES = ("fusionunet", "asppfusion", "denseasppfusion")
@@ -245,6 +248,21 @@ def build_model(name: str, pretrained_backbone: bool = True) -> nn.Module:
         from .plcs_lite import PLCSLite
 
         return PLCSLite(in_channels=in_channels)
+
+    if backbone == "m20566_replight":
+        from .m20566_replight import M20566RepLight
+
+        return M20566RepLight(in_channels=in_channels)
+
+    if backbone == "m20566_lmf":
+        from .m20566_replight import M20566LMF
+
+        return M20566LMF(in_channels=in_channels)
+
+    if backbone == "m20566_lcs":
+        from .m20566_replight import M20566LCS
+
+        return M20566LCS(in_channels=in_channels)
 
     # Should never reach here due to parse_model_variant guard
     raise ValueError(f"Unknown backbone: {backbone}")

@@ -20,6 +20,9 @@ __all__ = [
     "DenseASPPFusionUNet",
     "ModelSpec",
     "ResNetUNet",
+    "M20566RepLight",
+    "M20566LMF",
+    "M20566LCS",
     "UNet5ch",
     "build_model",
     "parse_model_variant",
@@ -27,6 +30,9 @@ __all__ = [
 
 
 _ARCHITECTURES = {
+    "M20566RepLight": ("m20566_replight", "M20566RepLight"),
+    "M20566LMF": ("m20566_replight", "M20566LMF"),
+    "M20566LCS": ("m20566_replight", "M20566LCS"),
     "ASPPUNet": ("context_unet", "ASPPUNet"),
     "ContextUNet": ("context_unet", "ContextUNet"),
     "MambaASPPUNet": ("context_unet", "MambaASPPUNet"),
