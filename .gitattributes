@@ -1,0 +1,9 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# Keep LF line endings for shell scripts and python
+*.sh text eol=lf
+*.py text eol=lf
+*.md text
+*.toml text
+*.txt text

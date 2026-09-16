@@ -1,18 +1,86 @@
-# IDE
-.idea/
+# ============================================================
+# .gitignore for Underwater Image Enhancement (UWIR)
+# ============================================================
 
-# Checkpoints & run outputs
-checkpoints/
-results/
-output/
-weights/
-
-# Python
+# Byte-compiled / optimized / DLL files
 __pycache__/
-*.pyc
-*.pth
-*.egg-info/
-.venv/
+*.py[cod]
+*$py.class
+*.so
 
-# Datasets (too large for version control)
-datasets/
+# Distribution / packaging
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE & Editor settings
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Testing and linting
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Project checkpoints & model weights (large binaries - store on HF / Drive / Releases)
+checkpoints/*
+!checkpoints/.gitkeep
+!checkpoints/README.md
+weights/
+tmp_ckpt*/
+artifacts/
+figures/
+*.pth
+*.pt
+*.onnx
+*.engine
+
+# Datasets (large files - do not push to GitHub)
+datasets/*
+!datasets/.gitkeep
+!datasets/README.md
+datasets.zip
+*.rar
+*.tar.gz
+*.zip
+*.7z
+
+# Execution logs and runtime outputs
+logs/*
+!logs/.gitkeep
+results/*
+!results/.gitkeep
+*.log
+*.done
+
+# Local reports & research manuscripts
+manuscript*.tex
+project_process_report.tex
+*.pdf

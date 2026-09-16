@@ -1,42 +1,39 @@
 # ============================================================
-# requirements.txt  –  Underwater Image Enhancement
+# requirements.txt  –  Underwater Image Enhancement (UWIR)
 # Install with: pip install -r requirements.txt
 #
-# PyTorch (CUDA 12.1): uncomment the torch block below and
-# comment out the plain `torch` line, OR install manually:
-#   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+# For CUDA-accelerated PyTorch:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
 # ============================================================
 
-# --- Core deep learning ---
+# --- Core Deep Learning & Tensor Ops ---
 torch>=2.1.0
 torchvision>=0.16.0
-torchaudio>=2.1.0
 
-# --- Scientific computing ---
+# --- Scientific Computing ---
 numpy>=1.24.0
 scipy>=1.11.0
 
-# --- Image processing ---
+# --- Image Processing & Augmentation ---
 opencv-python>=4.8.0
 Pillow>=10.0.0
 scikit-image>=0.21.0
 
-# --- Loss / metrics ---
+# --- Differentiable Vision Metrics & Loss Functions ---
 kornia>=0.7.0
 
-# --- Profiling ---
+# --- Training Utilities & Progress Monitoring ---
+tqdm>=4.65.0
+tabulate>=0.9.0
+psutil>=5.9.0
+
+# --- Model Complexity & Profiling (Params / FLOPs) ---
 thop>=0.1.1
 
-# --- MambaVision backbone (NVIDIA 2024 hybrid Mamba+Transformer) ---
-# Uses the HuggingFace transformers backend (pure-PyTorch, Windows/CPU-compatible).
-# Pretrained weights download automatically from nvidia/MambaVision-{T,S,B}-1K
-# on HuggingFace Hub on first use.
-transformers>=4.40.0
-huggingface_hub>=0.20.0
-einops>=0.7.0         # tensor rearrangements used by MambaVisionMixer
+# --- Visualization & Benchmark Analysis ---
+matplotlib>=3.8.0
+pandas>=2.0.0
+seaborn>=0.13.0
 
-# --- Native Mamba selective scan CUDA kernel ---
-# Linux + CUDA (Kaggle) only. Gives ~200x speedup over the Python loop fallback.
-# Install BEFORE running train.py on Kaggle:  pip install mamba-ssm
-# Skip on Windows — the Python chunked-scan fallback is used automatically.
-# mamba-ssm>=1.2.0
+# --- Development & Testing ---
+pytest>=8.0.0
