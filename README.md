@@ -1,80 +1,188 @@
-# Physics-Informed Underwater Image Restoration
+# Physics-Informed Underwater Image Restoration (UWIR)
 
-This repository contains the implementation used to study whether transmission
-and backscatter priors improve underwater image restoration when the restoration
-backbone is held fixed. The published study uses one customized U-Net with four
-input configurations:
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![PyTorch 2.1+](https://img.shields.io/badge/PyTorch-2.1+-ee4c2c.svg)](https://pytorch.org/)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-green.svg)](LICENSE)
+[![Tests](https://img.shields.io/badge/tests-passing-brightgreen.svg)](tests/)
 
-| Model | Input |
-|---|---|
-| `unet_3ch` | RGB |
-| `unet_4ch_t` | RGB + transmission map |
-| `unet_4ch_b` | RGB + background/backscatter map |
-| `unet_5ch` | RGB + both physics maps |
+This repository provides a modular, high-performance framework for **Physics-Informed Underwater Image Restoration (UWIR)**. It combines physical optical imaging priors (transmission and backscatter estimation via UDCP) with modern deep learning and lightweight restoration architectures, including **SGMA-Net** (Mamba-Attention), **FA-Net / FA-Net+**, **NAFNet**, **U-Net**, and **UW-LYT**.
 
-UW-LYT and UW-LYT-Tiny are deliberately retained as ongoing lightweight-model
-experiments. Their results are not mixed with the paper's reported U-Net
-results.
+---
 
-## Repository scope
+## 🌟 Key Features
+
+- **Physics-Guided Input Formulations**: Flexible model contracts supporting 3, 4, and 5-channel inputs:
+  - `3ch`: Standard RGB input.
+  - `4ch_t`: RGB + Transmission map ($t(x)$).
+  - `4ch_b`: RGB + Background / Backscatter light map ($B_\infty$).
+  - `5ch`: RGB + both Transmission and Backscatter physics priors.
+- **Comprehensive Model Zoo**:
+  - **SGMA-Net** (Lightweight Mamba-Attention Network): Combines selective state-space sequence modeling with spatial attention.
+  - **FA-Net / FA-Net+**: Frequency and feature attention networks for detail sharpening and color correction.
+  - **NAFNet-Tiny**: Non-linear activation-free architecture for efficient restoration.
+  - **LiteEnhanceNet / LSNet / MobileIE**: Edge-optimized architectures for mobile and embedded deployment.
+  - **Customized U-Net & UW-LYT**: Paper baseline architectures.
+- **Standardized Datasets**: Built-in loaders for **EUVP** (Underwater Dark, Imagenet, Scenes) and **UIEB** (890 paired real-world images).
+- **Comprehensive Metrics Suite**:
+  - Full-Reference: PSNR, SSIM, CIEDE2000.
+  - No-Reference: UCIQE, UIQM.
+  - Efficiency: Params (M), FLOPs (G), Latency (ms), and FPS.
+- **Tiled Inference**: Seamless processing of arbitrarily high-resolution images without GPU out-of-memory errors.
+
+---
+
+## 📂 Repository Structure
 
 ```text
-src/uwir/
-  cli/          training, evaluation, and profiling commands
-  data/         paired UIEB and EUVP loaders
-  models/       customized U-Net and UW-LYT
-  physics/      paper physics-channel implementation
-  losses.py     L1, perceptual, and optional SSIM losses
-  metrics.py    PSNR, SSIM, CIEDE2000, UCIQE, and UIQM
-scripts/
-  experiments/  multi-seed UIEB and EUVP ablations
-  visualization/ paper-result plotting
-tests/          focused reproducibility and model tests
+underwater-image-enhancement/
+├── src/uwir/                       # Core package
+│   ├── cli/                        # Command-line tools (train, evaluate, profile)
+│   ├── data/                       # Dataset loaders (EUVP, UIEB, factory)
+│   ├── models/                     # Model zoo (SGMA-Net, FA-Net+, NAFNet, U-Net, etc.)
+│   ├── physics/                    # Optical priors (UDCP transmission & backscatter)
+│   ├── training/                   # Learning rate schedulers & optimizers
+│   ├── losses.py                   # CompositeLoss (L1, Perceptual, SSIM, Gradient)
+│   ├── metrics.py                  # PSNR, SSIM, CIEDE2000, UCIQE, UIQM, tiled inference
+│   └── config.py                   # Training & benchmark configuration
+│
+├── scripts/                        # Experiment & utility scripts
+│   ├── inference.py                # Direct inference on images/folders
+│   ├── setup_wsl_mamba.sh          # Environment setup for Linux/WSL
+│   ├── diagnostics/                # Physics map visualization & verification
+│   ├── experiments/                # Multi-seed ablation studies & bash runners
+│   └── visualization/              # Publication-ready qualitative & quantitative plots
+│
+├── tests/                          # 12 unit and integration test suites
+├── docs/                           # Published results & literature reviews
+├── datasets/                       # Dataset placeholder with layout guide
+├── checkpoints/                    # Saved weights (.pth) placeholder
+├── results/                        # Output evaluation logs and images
+├── logs/                           # Training run logs
+├── pyproject.toml                  # Build system & package metadata
+└── requirements.txt                # Python package dependencies
 ```
 
-The manuscript source is intentionally not stored in this repository. Reported
-numeric results are preserved separately in
-[`docs/reported_results.md`](docs/reported_results.md).
+---
 
-## Installation
+## 🚀 Getting Started
 
-Python 3.10 or newer is required.
+### 1. Prerequisites & Installation
+
+Python **3.10** or newer is required.
 
 ```bash
-python -m pip install -e .
-python -m pip install -e '.[dev,profile,visualization]'
+# Clone the repository
+git clone https://github.com/heniath/underwater-image-enhancement.git
+cd underwater-image-enhancement
+
+# Create and activate a virtual environment
+python -m venv .venv
+source .venv/bin/activate       # On Linux/WSL
+# or .\.venv\Scripts\activate   # On Windows
+
+# Install PyTorch with CUDA (e.g. CUDA 12.1)
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+
+# Install requirements and package in editable mode
+pip install -e .
+pip install -e ".[dev,profile,visualization]"
 ```
 
-## Datasets
+### 2. Verify Installation with Tests
+
+Run the test suite to ensure all dependencies and model registries are functioning properly (tests run immediately on CPU using synthetic dummy tensors):
+
+```bash
+pytest
+```
+
+---
+
+## 📊 Dataset Preparation
+
+Organize your datasets in the `datasets/` directory as follows:
 
 ```text
 datasets/
-  EUVP/
-    Paired/
-      underwater_imagenet/trainA/ trainB/
-      underwater_dark/trainA/ trainB/
-      underwater_scenes/trainA/ trainB/
-    test_samples/Inp/ GTr/
-  UIEB/
-    raw-890/
-    reference-890/
+├── EUVP/
+│   ├── Paired/
+│   │   ├── underwater_imagenet/trainA/ (degraded)  trainB/ (clean)
+│   │   ├── underwater_dark/trainA/      trainB/
+│   │   └── underwater_scenes/trainA/    trainB/
+│   └── test_samples/Inp/ (degraded)  GTr/ (ground truth)
+│
+└── UIEB/
+    ├── raw-890/             # 890 degraded real-world images
+    └── reference-890/       # Corresponding ground truth references
 ```
 
-UIEB uses 800 development pairs and a held-out T90 evaluation set. EUVP training
-combines its three paired subsets, and evaluation uses the 515-image official
-test sample collection.
+Refer to [`datasets/README.md`](datasets/README.md) for official download links and extraction details.
 
-## Paper protocol
+---
 
-The paper reports three independent runs per input configuration, 100 epochs,
-batch size 4, random 256×256 crops, Adam with learning rate `2e-4`, and cosine
-annealing. It evaluates PSNR, SSIM, CIEDE2000, UCIQE, and UIQM.
+## 🖼️ Inference (Enhance Your Own Images)
 
-Train one configuration:
+Enhance a single image or a folder of images using a trained checkpoint:
+
+```bash
+# Enhance a folder of images
+python scripts/inference.py \
+  --checkpoint checkpoints/best_model.pth \
+  --model sgmanet_5ch \
+  --input_dir path/to/raw_images \
+  --output_dir results/enhanced_images \
+  --device cuda
+
+# Enhance a single image
+python scripts/inference.py \
+  --checkpoint checkpoints/best_model.pth \
+  --model sgmanet_5ch \
+  --input_image path/to/underwater.jpg \
+  --output_dir results/enhanced_images
+```
+
+> **Tip**: For high-resolution images (e.g. 4K), `--tile_size 512 --tile_overlap 64` is enabled by default to prevent CUDA OOM while seamlessly stitching tiles.
+
+---
+
+## ⚡ Model Zoo & Profiling
+
+Inspect model parameters, FLOPs, and runtime speed:
+
+```bash
+# List all registered models
+uwir-profile --list
+
+# Profile SGMA-Net on GPU
+uwir-profile sgmanet_5ch --device cuda --img_size 256
+
+# Profile FA-Net+ on CPU
+uwir-profile fanetplus_5ch --device cpu --img_size 256
+```
+
+### Model Variants Overview
+
+| Model | Variants | Description |
+|---|---|---|
+| **SGMA-Net** | `sgmanet_3ch`, `sgmanet_4ch_t`, `sgmanet_4ch_b`, `sgmanet_5ch` | Lightweight Mamba State-Space + Attention |
+| **FA-Net+** | `fanetplus_3ch`, `fanetplus_5ch` | Enhanced Frequency Attention Network |
+| **FA-Net** | `fanet_3ch`, `fanet_5ch` | Frequency Attention Network baseline |
+| **NAFNet-Tiny** | `nafnettiny_3ch` | Nonlinear Activation Free Network |
+| **LiteEnhanceNet** | `liteenhancenet_3ch` | High-throughput lightweight architecture |
+| **LSNet** | `lsnet_3ch` | Lightweight Spectral Network |
+| **MobileIE** | `mobileie_3ch` | Mobile-optimized inverted bottleneck design |
+| **U-Net** | `unet_3ch`, `unet_4ch_t`, `unet_4ch_b`, `unet_5ch` | Paper baseline study architecture |
+| **UW-LYT** | `uwlyt_3ch`, `uwlyt_5ch`, `uwlyttiny_3ch`, `uwlyttiny_5ch` | Multi-scale lightweight model |
+
+---
+
+## 🏋️ Training & Evaluation
+
+### Train a Model
 
 ```bash
 uwir-train \
-  --model unet_5ch \
+  --model sgmanet_5ch \
   --dataset euvp \
   --data_train_euvp ./datasets/EUVP \
   --nEpochs 100 \
@@ -84,24 +192,13 @@ uwir-train \
   --cos_restart true \
   --L1_weight 1.0 \
   --perceptual_weight 1.0 \
-  --SSIM_weight 0.0 \
+  --SSIM_weight 0.1 \
   --seed 0
 ```
 
-Run the multi-seed experiment drivers:
+### Evaluate Checkpoints
 
-```bash
-python -m scripts.experiments.ablation_euvp --variants \
-  unet_3ch unet_4ch_t unet_4ch_b unet_5ch
-
-python -m scripts.experiments.ablation_uieb --variants \
-  unet_3ch unet_4ch_t unet_4ch_b unet_5ch
-```
-
-All runner settings can be overridden explicitly. Existing reported values are
-historical paper results and are never overwritten by the documentation.
-
-Evaluate compatible checkpoint directories:
+Evaluate all models in a checkpoint directory against full-reference and no-reference benchmarks:
 
 ```bash
 uwir-evaluate \
@@ -111,45 +208,44 @@ uwir-evaluate \
   --val_folder ./results/euvp
 ```
 
-## UW-LYT experiments
+### Automated Ablation Runs
 
-UW-LYT supports the same input contracts as the U-Net, allowing a future
-controlled lightweight comparison:
-
-```bash
-uwir-train --model uwlyt_3ch --dataset euvp
-uwir-train --model uwlyt_4ch_t --dataset euvp
-uwir-train --model uwlyt_4ch_b --dataset euvp
-uwir-train --model uwlyt_5ch --dataset euvp
-```
-
-Use `uwlyttiny_*` for the narrower Tiny variant. Profile retained architectures
-with:
+Run multi-seed ablation experiments across variants:
 
 ```bash
-uwir-profile --list
-uwir-profile uwlyt --device cuda
+# EUVP ablation
+python -m scripts.experiments.ablation_euvp \
+  --variants sgmanet_3ch sgmanet_4ch_t sgmanet_4ch_b sgmanet_5ch
+
+# UIEB ablation
+python -m scripts.experiments.ablation_uieb \
+  --variants sgmanet_3ch sgmanet_4ch_t sgmanet_4ch_b sgmanet_5ch
 ```
 
-## Inference
-
-Enhance single images or a whole directory using a trained model checkpoint:
+Or run all automated tournament experiments:
 
 ```bash
-python scripts/inference.py \
-  --checkpoint checkpoints/best_model.pth \
-  --model sgmanet_5ch \
-  --input_dir ./datasets/EUVP/test_samples/Inp \
-  --output_dir ./results/inference_outputs
+bash scripts/experiments/run_sgmanet_all.sh
 ```
 
-## Tests
+---
 
-```bash
-pytest
+## 📓 Notebooks
+
+- [`uwlytms_kaggle.ipynb`](uwlytms_kaggle.ipynb): Ready-to-run interactive training and evaluation pipeline on Kaggle GPU.
+- [`uwlytms_local.ipynb`](uwlytms_local.ipynb): Local prototyping and visualization notebook.
+
+---
+
+## 📄 Citation & License
+
+This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
+
+```bibtex
+@article{uwir2026,
+  title={Physics-Informed Underwater Image Restoration},
+  author={Heniath and Contributors},
+  journal={EIDT},
+  year={2026}
+}
 ```
-
-## License
-
-See [LICENSE](LICENSE).
-
