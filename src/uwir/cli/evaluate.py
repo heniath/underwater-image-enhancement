@@ -196,16 +196,26 @@ def main():
     # ------------------------------------------------------------------
     # Dataset (built once; each model gets its own DataLoader)
     # ------------------------------------------------------------------
-    data_root = args.data_train_euvp if args.eval_benchmark == "euvp" else args.data_train_uieb
-    print(f"\nLoading {args.eval_benchmark} test samples from '{data_root}' …")
-    test_pairs = (
-        collect_test_pairs(data_root)
-        if args.eval_benchmark == "euvp"
-        else collect_uieb_test_pairs(data_root, seed=42)
-    )
+    if args.eval_benchmark == "euvp":
+        data_root = args.data_train_euvp
+        print(f"\nLoading EUVP test samples from '{data_root}' …")
+        test_pairs = collect_test_pairs(data_root)
+    elif args.eval_benchmark == "uieb":
+        data_root = args.data_train_uieb
+        print(f"\nLoading UIEB-90 test samples from '{data_root}' …")
+        test_pairs = collect_uieb_test_pairs(data_root, seed=42)
+    elif args.eval_benchmark == "uieb+euvp":
+        print(f"\nLoading combined test samples (UIEB from '{args.data_train_uieb}', EUVP from '{args.data_train_euvp}') …")
+        uieb_pairs = collect_uieb_test_pairs(args.data_train_uieb, seed=42)
+        euvp_pairs = collect_test_pairs(args.data_train_euvp)
+        test_pairs = uieb_pairs + euvp_pairs
+        print(f"Loaded: UIEB (n={len(uieb_pairs)}) + EUVP (n={len(euvp_pairs)})")
+    else:
+        raise ValueError(f"Unknown --eval_benchmark: {args.eval_benchmark}")
+
     native_ds = TestDataset(test_pairs)
     legacy_ds = TestDataset(test_pairs, img_size=args.cropSize)
-    print(f"Test set size : {len(native_ds)} images")
+    print(f"Total Test set size : {len(native_ds)} images")
 
     checkpoint_dir = args.checkpoint_dir
     if not os.path.exists(checkpoint_dir):

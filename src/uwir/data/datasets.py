@@ -41,7 +41,16 @@ class UIEBDataset(data.Dataset):
     INPUT_DIR = "raw-890"
     GT_DIR = "reference-890"
 
-    def __init__(self, data_dir, transform=None, augment=False, in_memory=False, img_size=None):
+    def __init__(
+        self,
+        data_dir,
+        transform=None,
+        augment=False,
+        in_memory=False,
+        img_size=None,
+        split: str = "all",
+        limit: int = 800,
+    ):
         super().__init__()
         self.input_dir = join(data_dir, self.INPUT_DIR)
         self.gt_dir = join(data_dir, self.GT_DIR)
@@ -71,10 +80,18 @@ class UIEBDataset(data.Dataset):
             f"({len(self.input_files)} inputs vs {len(self.gt_files)} GTs)"
         )
 
+        # Apply split (train: 800 images, test: 90 images)
+        if split == "train" and limit is not None and limit > 0:
+            self.input_files = self.input_files[:limit]
+            self.gt_files = self.gt_files[:limit]
+        elif split == "test" and limit is not None and limit > 0:
+            self.input_files = self.input_files[limit:]
+            self.gt_files = self.gt_files[limit:]
+
         if self.in_memory:
-            print("Loading UIEB dataset into memory...")
-            self.input_images = [load_img(f) for f in tqdm(self.input_files, desc="UIEB Inputs")]
-            self.gt_images = [load_img(f) for f in tqdm(self.gt_files, desc="UIEB GTs")]
+            print(f"Loading UIEB dataset ({split}, {len(self.input_files)} pairs) into memory...")
+            self.input_images = [load_img(f) for f in tqdm(self.input_files, desc=f"UIEB {split.title()} Inputs")]
+            self.gt_images = [load_img(f) for f in tqdm(self.gt_files, desc=f"UIEB {split.title()} GTs")]
 
     def __getitem__(self, index):
         if self.in_memory:

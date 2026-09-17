@@ -300,7 +300,15 @@ def train_epoch(
 ):
     model.train()
     tot_loss = 0.0
-    comps = {"l1": 0.0, "perceptual": 0.0, "ssim_loss": 0.0}
+    comps = {
+        "l1": 0.0,
+        "perceptual": 0.0,
+        "ssim_loss": 0.0,
+        "tv": 0.0,
+        "edge": 0.0,
+        "lvw": 0.0,
+        "uiqm": 0.0,
+    }
     consecutive_amp_overflows = 0
 
     pbar = tqdm(loader, desc=desc or "Train", leave=False, dynamic_ncols=True)
@@ -518,9 +526,23 @@ def main():
             subset=args.euvp_subset,
             in_memory=args.in_memory,
         )
+        train_ds, val_ds = _split_train_validation(train_ds, args.split_seed)
     elif args.dataset == "uieb":
+        # Train strictly on UIEB 800 images; validate on the remaining 90 test images
         train_ds = get_uieb_training_set(
-            args.data_train_uieb, img_size=args.cropSize, in_memory=args.in_memory
+            args.data_train_uieb,
+            img_size=args.cropSize,
+            in_memory=args.in_memory,
+            split="train",
+            limit=args.uieb_limit,
+        )
+        from uwir.data.datasets import UIEBDataset
+        val_ds = UIEBDataset(
+            args.data_train_uieb,
+            img_size=args.cropSize,
+            in_memory=args.in_memory,
+            split="test",
+            limit=args.uieb_limit,
         )
     elif args.dataset == "euvp+uieb":
         euvp_ds = get_euvp_training_set(
@@ -530,16 +552,17 @@ def main():
             in_memory=args.in_memory,
         )
         uieb_ds = get_uieb_training_set(
-            args.data_train_uieb, img_size=args.cropSize, in_memory=args.in_memory
+            args.data_train_uieb,
+            img_size=args.cropSize,
+            in_memory=args.in_memory,
+            split="train",
+            limit=args.uieb_limit,
         )
         train_ds = data.ConcatDataset([euvp_ds, uieb_ds])
+        train_ds, val_ds = _split_train_validation(train_ds, args.split_seed)
     else:
         raise ValueError(f"Unknown --dataset: {args.dataset}")
 
-    # Validation: 10 % hold-out from the training set (paired → gives GT for
-    # loss + metric computation).  Fixed seed for reproducibility.
-    # NOTE: EUVP has no separate testA/testB; validation/ is unpaired (no GT).
-    train_ds, val_ds = _split_train_validation(train_ds, args.split_seed)
     n_train, n_val = len(train_ds), len(val_ds)
     print(f"Dataset   : {args.dataset}  (train={n_train}, val={n_val})")
 
@@ -573,6 +596,18 @@ def main():
         lambda_l1=args.L1_weight,
         lambda_perc=args.perceptual_weight,
         lambda_ssim=args.SSIM_weight,
+        lambda_tv=args.tv_weight,
+        lambda_edge=args.edge_weight,
+        lambda_lvw=args.lvw_weight,
+        lambda_uiqm=args.uiqm_weight,
+        lvw_mode=getattr(args, "lvw_mode", "spatial"),
+        use_l1=args.use_l1,
+        use_perc=args.use_perc,
+        use_ssim=args.use_ssim,
+        use_tv=args.use_tv,
+        use_edge=args.use_edge,
+        use_lvw=args.use_lvw,
+        use_uiqm=args.use_uiqm,
         device=device,
     )
 

@@ -196,7 +196,8 @@ def option():
     )
 
     # ------------------------------------------------------------------
-    # Loss weights  λ1·L_pixel + λ2·L_perceptual + λ3·L_SSIM
+    # Loss weights & 0/1 toggles: λ1·L_pixel + λ2·L_perceptual + λ3·L_SSIM + ...
+    # Easily toggle any loss on Kaggle by setting --use_<loss> 0 or 1
     # ------------------------------------------------------------------
     parser.add_argument(
         "--L1_weight",
@@ -208,13 +209,95 @@ def option():
         "--perceptual_weight",
         type=float,
         default=1.0,
-        help="λ2 — VGG-16 perceptual loss weight",
+        help="λ2 — VGG-16 perceptual loss weight (default 1.0, matching 1:1 base loss)",
     )
     parser.add_argument(
         "--SSIM_weight",
         type=float,
         default=0.0,
         help="λ3 — SSIM loss weight",
+    )
+    parser.add_argument(
+        "--tv_weight",
+        type=float,
+        default=0.001,
+        help="λ_tv — Total Variation loss weight (literature default: 0.001)",
+    )
+    parser.add_argument(
+        "--edge_weight",
+        type=float,
+        default=0.1,
+        help="λ_edge — Gaussian-Laplacian Edge loss weight (literature default: 0.1)",
+    )
+    parser.add_argument(
+        "--lvw_weight",
+        type=float,
+        default=0.1,
+        help="λ_lvw — MobileIE Local Variance-Weighted loss weight (default: 0.1)",
+    )
+    parser.add_argument(
+        "--uiqm_weight",
+        type=float,
+        default=0.05,
+        help="λ_uiqm — Differentiable UIQM loss weight (Mamba UWIR default: 0.05)",
+    )
+
+    # Simple 0 / 1 toggles for Kaggle ablations
+    parser.add_argument(
+        "--use_l1",
+        type=int,
+        default=1,
+        choices=[0, 1],
+        help="Toggle L1 loss (1=enable, 0=disable)",
+    )
+    parser.add_argument(
+        "--use_perc",
+        type=int,
+        default=1,
+        choices=[0, 1],
+        help="Toggle VGG perceptual loss (1=enable, 0=disable)",
+    )
+    parser.add_argument(
+        "--use_ssim",
+        type=int,
+        default=0,
+        choices=[0, 1],
+        help="Toggle SSIM loss (1=enable, 0=disable)",
+    )
+    parser.add_argument(
+        "--use_tv",
+        type=int,
+        default=0,
+        choices=[0, 1],
+        help="Toggle Total Variation loss (1=enable, 0=disable)",
+    )
+    parser.add_argument(
+        "--use_edge",
+        type=int,
+        default=0,
+        choices=[0, 1],
+        help="Toggle Edge loss (1=enable, 0=disable)",
+    )
+    parser.add_argument(
+        "--use_lvw",
+        type=int,
+        default=0,
+        choices=[0, 1],
+        help="Toggle MobileIE Local Variance loss (1=enable, 0=disable)",
+    )
+    parser.add_argument(
+        "--use_uiqm",
+        type=int,
+        default=0,
+        choices=[0, 1],
+        help="Toggle UIQM loss (1=enable, 0=disable)",
+    )
+    parser.add_argument(
+        "--lvw_mode",
+        type=str,
+        default="spatial",
+        choices=["spatial", "window"],
+        help="Mode for Local Variance Loss: 'spatial' (exact MobileIE Eq 8) or 'window' (sliding KxK)",
     )
 
     # ------------------------------------------------------------------
@@ -242,6 +325,12 @@ def option():
         type=str,
         default="./datasets/UIEB",
         help="Root of UIEB release (supplementary training)",
+    )
+    parser.add_argument(
+        "--uieb_limit",
+        type=int,
+        default=800,
+        help="Number of UIEB samples to use for training (default: 800 images)",
     )
 
     # ------------------------------------------------------------------
@@ -293,9 +382,9 @@ def option():
     )
     parser.add_argument(
         "--eval_benchmark",
-        choices=["euvp", "uieb"],
-        default="euvp",
-        help="Paired benchmark evaluated by uwir-evaluate",
+        choices=["euvp", "uieb", "uieb+euvp"],
+        default="uieb+euvp",
+        help="Paired benchmark evaluated by uwir-evaluate (euvp, uieb, or uieb+euvp)",
     )
     parser.add_argument("--tile_size", type=int, default=512)
     parser.add_argument("--tile_overlap", type=int, default=64)
