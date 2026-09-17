@@ -98,6 +98,10 @@ def _add_physics_channels(
 
         physics_extractor = compute_physics_maps_rgb
 
+    if not isinstance(rgb_tensor, torch.Tensor):
+        import torchvision.transforms.functional as TF
+        rgb_tensor = TF.to_tensor(rgb_tensor)
+
     img_np = rgb_tensor.permute(1, 2, 0).numpy().astype(np.float32)
     t_map, background = physics_extractor(img_np)
     t_t = torch.from_numpy(np.asarray(t_map, dtype=np.float32)).unsqueeze(0)
@@ -153,9 +157,14 @@ def _collate_train(batch, physics_mode: str, physics_extractor=None):
 
     Dataset items are (inp_tensor, gt_tensor, fname_in, fname_gt).
     """
+    import torchvision.transforms.functional as TF
     inps = []
     gts = []
     for inp, gt, *_ in batch:
+        if not isinstance(inp, torch.Tensor):
+            inp = TF.to_tensor(inp)
+        if not isinstance(gt, torch.Tensor):
+            gt = TF.to_tensor(gt)
         inp = _add_physics_channels(inp, physics_mode, physics_extractor)
         inps.append(inp)
         gts.append(gt)
@@ -541,8 +550,10 @@ def main():
             limit=args.uieb_limit,
         )
         from uwir.data.datasets import UIEBDataset
+        from uwir.data.factory import _train_transform
         val_ds = UIEBDataset(
             args.data_train_uieb,
+            transform=_train_transform(),
             img_size=args.cropSize,
             in_memory=args.in_memory,
             split="test",
