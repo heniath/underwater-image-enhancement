@@ -266,10 +266,22 @@ def save_ckpt(model, optimizer, epoch, metrics, path):
 
 def load_ckpt(path, model, optimizer=None, device="cpu"):
     ckpt = torch.load(path, map_location=device)
-    _unwrap(model).load_state_dict(ckpt["model"])
-    if optimizer and "optimizer" in ckpt:
+    if isinstance(ckpt, dict) and "model" in ckpt:
+        state_dict = ckpt["model"]
+        epoch = ckpt.get("epoch", 0)
+        metrics = ckpt.get("metrics", {})
+    elif isinstance(ckpt, dict) and "state_dict" in ckpt:
+        state_dict = ckpt["state_dict"]
+        epoch = ckpt.get("epoch", 0)
+        metrics = ckpt.get("metrics", {})
+    else:
+        state_dict = ckpt
+        epoch = 0
+        metrics = {}
+    _unwrap(model).load_state_dict(state_dict)
+    if optimizer and isinstance(ckpt, dict) and "optimizer" in ckpt:
         optimizer.load_state_dict(ckpt["optimizer"])
-    return ckpt["epoch"], ckpt.get("metrics", {})
+    return epoch, metrics
 
 
 # ============================================================

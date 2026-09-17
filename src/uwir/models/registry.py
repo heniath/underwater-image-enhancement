@@ -56,6 +56,7 @@ _BACKBONES = (
     "m20566_replight",
     "m20566_lmf",
     "m20566_lcs",
+    "m20566_physics_next",
 )
 
 _FUSION_BACKBONES = ("fusionunet", "asppfusion", "denseasppfusion")
@@ -263,6 +264,11 @@ def build_model(name: str, pretrained_backbone: bool = True) -> nn.Module:
         from .m20566_replight import M20566LCS
 
         return M20566LCS(in_channels=in_channels)
+
+    if backbone == "m20566_physics_next":
+        from .m20566_physics_next import PhysicsOSANet
+
+        return PhysicsOSANet(in_channels=in_channels)
 
     # Should never reach here due to parse_model_variant guard
     raise ValueError(f"Unknown backbone: {backbone}")

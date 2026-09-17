@@ -1,70 +1,49 @@
 """
-PLite-Net: Physics-Guided LiteEnhanceNet
-Inherits the ultra-lightweight backbone of LiteEnhanceNet (~15.2k parameters).
-Integrates:
-  1. Transmission map estimation head t(x)
-  2. Background / water light estimation head B
-  3. Forward Optical Degradation Re-synthesis (Koschmieder optical model):
-     I_redeg = J * t + B * (1 - t)
+PLite-Net: Physics-Guided LiteEnhanceNet with Optical Re-degradation Branch
+Total Parameters: 18,444
 """
+
+import os
+os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
 
 import torch
 import torch.nn as nn
-from .lite_enhancenet import ConvBlock1, ConvBlock2, ConvBlock3, ConvBlock4
+from .lite_enhancenet import LiteEnhanceNet
 
 
 class PLiteNet(nn.Module):
-    """
-    Physical-Guided LiteEnhanceNet (~15.2k parameters).
-    During training: returns (J, I_redeg, t, B) if requested, or J by default.
-    During inference: returns J directly with zero overhead.
-    """
-
-    def __init__(self, in_channels=3, out_channels=3):
-        super().__init__()
-        self.input = nn.Conv2d(in_channels, 16, kernel_size=1, stride=1, padding=0, bias=False)
-        self.block1 = ConvBlock1(16, 32)
-        self.block2 = ConvBlock2(32, 64)
-        self.block3 = ConvBlock3(64, 32)
-        self.block4 = ConvBlock4(80, 32)
+    def __init__(self, in_channels=3):
+        super(PLiteNet, self).__init__()
+        self.enhancer = LiteEnhanceNet(in_channels=in_channels)
         
-        # Head 1: Radiance residual delta J
-        self.head_j = nn.Conv2d(32, out_channels, kernel_size=1, stride=1, padding=0, bias=False)
-        
-        # Head 2: Transmission map t(x) (1-ch, in (0, 1])
-        self.head_t = nn.Sequential(
-            nn.Conv2d(32, 16, kernel_size=3, padding=1, bias=False),
-            nn.BatchNorm2d(16),
+        # Physical estimation branch for t(x) (1 channel) and B(x) (3 channels)
+        self.phy_branch = nn.Sequential(
+            nn.Conv2d(in_channels, 72, kernel_size=3, stride=1, padding=1, bias=True),
+            nn.BatchNorm2d(72),
             nn.ReLU(inplace=True),
-            nn.Conv2d(16, 1, kernel_size=1),
-            nn.Sigmoid()
-        )
-        
-        # Head 3: Background light B (3-ch scalar per image)
-        self.head_b = nn.Sequential(
-            nn.AdaptiveAvgPool2d(1),
-            nn.Flatten(),
-            nn.Linear(32, 3),
-            nn.Sigmoid()
+            nn.Conv2d(72, 4, kernel_size=3, stride=1, padding=1, bias=True)
         )
 
     def forward(self, x, return_physics=False):
-        inp_rgb = x[:, :3, :, :] if x.shape[1] > 3 else x
-        f0 = self.input(x)
-        f1 = self.block1(f0)
-        f2 = self.block2(f1)
-        f3 = self.block3(f2)
-        f_cat = torch.cat([f0, f1, f3], dim=1)
-        f4 = self.block4(f_cat)
+        """
+        Args:
+            x: Input degraded underwater image [B, 3, H, W] in range [0, 1]
+            return_physics: If True, always returns tuple (J, I_redeg, t, B)
+        Returns:
+            In training mode: (J, I_redeg, t, B)
+            In eval mode (default): J
+        """
+        # 1. Enhanced image J
+        j = self.enhancer(x)
         
-        delta = self.head_j(f4)
-        j = torch.clamp(inp_rgb + delta, 0.0, 1.0)
+        # 2. Physics priors: transmission t and background light B
+        phy = torch.sigmoid(self.phy_branch(x))
+        t = phy[:, 0:1, :, :]  # [B, 1, H, W]
+        b = phy[:, 1:4, :, :]  # [B, 3, H, W]
         
-        if return_physics or self.training:
-            t = torch.clamp(self.head_t(f4), 0.05, 1.0)
-            b = self.head_b(f4).view(-1, 3, 1, 1)
-            i_redeg = j * t + b * (1.0 - t)
-            if return_physics:
-                return j, i_redeg, t, b
+        # 3. Optical re-degradation formula: I_redeg = J * t + B * (1 - t)
+        redeg = torch.clamp(j * t + b * (1.0 - t), 0.0, 1.0)
         
+        if self.training or return_physics:
+            return j, redeg, t, b
         return j

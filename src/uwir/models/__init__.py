@@ -23,6 +23,7 @@ __all__ = [
     "M20566RepLight",
     "M20566LMF",
     "M20566LCS",
+    "PhysicsOSANet",
     "UNet5ch",
     "build_model",
     "parse_model_variant",
@@ -30,6 +31,7 @@ __all__ = [
 
 
 _ARCHITECTURES = {
+    "PhysicsOSANet": ("m20566_physics_next", "PhysicsOSANet"),
     "M20566RepLight": ("m20566_replight", "M20566RepLight"),
     "M20566LMF": ("m20566_replight", "M20566LMF"),
     "M20566LCS": ("m20566_replight", "M20566LCS"),

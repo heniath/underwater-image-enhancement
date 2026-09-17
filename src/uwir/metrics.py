@@ -249,7 +249,9 @@ def evaluate_loader(
             )
             total_time_ms += (time.perf_counter() - t0) * 1000.0
 
-        pred_np = pred.cpu().permute(0, 2, 3, 1).numpy().clip(0, 1)
+        if isinstance(pred, (tuple, list)):
+            pred = pred[0]
+        pred_np = pred.detach().cpu().permute(0, 2, 3, 1).numpy().clip(0, 1)
         gt_np = gt.permute(0, 2, 3, 1).numpy().clip(0, 1)
 
         for i in range(pred_np.shape[0]):
