@@ -837,13 +837,17 @@ def main():
                 os.path.join(CKPT_DIR, f"epoch_{epoch:04d}.pth"),
             )
 
-        # Log line
-        if epoch == 1 or epoch % LOG_EVERY == 0 or flag:
-            print(
-                f"{epoch:>6}  {tr_loss:>8.4f}  {vl_loss:>8.4f}  "
-                f"{val_psnr:>7.3f}  {val_ssim:>7.4f}  {cur_lr:>9.2e}  "
-                f"{elapsed:>5.1f}s{flag}"
-            )
+        # Log every single epoch with flush=True and ETA
+        avg_ep_time = (time.time() - train_start) / (epoch - start_epoch + 1)
+        eta_sec = max(0, avg_ep_time * (args.nEpochs - epoch))
+        eta_m, eta_s = divmod(int(eta_sec), 60)
+        print(
+            f"[Epoch {epoch:03d}/{args.nEpochs}] "
+            f"TrainLoss: {tr_loss:6.4f}  ValLoss: {vl_loss:6.4f}  "
+            f"PSNR: {val_psnr:6.3f} dB  SSIM: {val_ssim:6.4f}  "
+            f"Time: {elapsed:4.1f}s  ETA: {eta_m}m{eta_s:02d}s{flag}",
+            flush=True
+        )
 
         # Early stopping
         if fresh_validation and es(val_psnr):
