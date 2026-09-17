@@ -300,8 +300,8 @@ class PhysicsOSANet(nn.Module):
             x = torch.cat([x, x[:, :pad_ch, :, :]], dim=1)
 
         rgb = x[:, :3, :, :]
-        t = x[:, 3:4, :, :]
-        b_map = x[:, 4:5, :, :] if self.in_channels >= 5 else torch.zeros_like(t)
+        t = x[:, 3:4, :, :] if x.shape[1] >= 4 else None
+        b_map = x[:, 4:5, :, :] if x.shape[1] >= 5 else (torch.zeros_like(t) if t is not None else None)
 
         # 1. Forward Extraction
         feat0 = self.stem(x)
@@ -325,7 +325,7 @@ class PhysicsOSANet(nn.Module):
         delta = self.residual_head(fused)
         j_hat = torch.clamp(rgb + delta, 0.0, 1.0)
 
-        if return_degradation and self.training:
+        if return_degradation and self.training and t is not None and b_map is not None:
             # Physical Re-degradation: I_redeg = J * t + B * (1 - t)
             i_redeg = j_hat * t + b_map * (1.0 - t)
             return j_hat, i_redeg
