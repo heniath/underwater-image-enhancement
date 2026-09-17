@@ -106,24 +106,58 @@ def compute_psnr_gpu(img1: torch.Tensor, img2: torch.Tensor) -> float:
 
 
 # -----------------------------------------------------------------------------
-# 3. Exact Loss: 1.0 * L1 + 1.0 * VGG
+# 3. Physics & Perceptual Composite Loss Formulations
 # -----------------------------------------------------------------------------
-class ExactL1PlusVGGLoss(nn.Module):
+class PhysicsCompositeLoss(nn.Module):
     """
-    Exact Loss Requested:
-    L_total = 1.0 * L1 + 1.0 * VGG
+    Composite Loss supporting:
+      1. 'vgg_redeg'     : 1.0 * L1 + 1.0 * VGG + lambda_redeg * Redeg
+      2. 'compound_redeg': 1.0 * L1 + 0.5 * MSE + 0.1 * SSIM + lambda_redeg * Redeg (from run_train_benchmarks.py)
+      3. 'vgg'           : 1.0 * L1 + 1.0 * VGG
     """
-    def __init__(self, target_device):
+    def __init__(self, target_device, loss_mode: str = "vgg_redeg", lambda_redeg: float = 0.1):
         super().__init__()
+        self.loss_mode = loss_mode
+        self.lambda_redeg = lambda_redeg
         self.l1 = nn.L1Loss()
-        self.vgg = VGGPerceptualLoss(device=target_device)
+        self.mse = nn.MSELoss()
+        self.target_device = target_device
 
-    def forward(self, pred: torch.Tensor, target: torch.Tensor) -> Tuple[torch.Tensor, dict]:
+        if "vgg" in loss_mode:
+            self.vgg = VGGPerceptualLoss(device=target_device)
+        else:
+            self.vgg = None
+
+    def forward(self, pred: torch.Tensor, target: torch.Tensor, i_redeg: torch.Tensor = None, raw_rgb: torch.Tensor = None) -> Tuple[torch.Tensor, dict]:
         l1_val = self.l1(pred, target)
-        with torch.amp.autocast('cuda', enabled=False):
-            vgg_val = self.vgg(pred.float(), target.float())
-        total = 1.0 * l1_val + 1.0 * vgg_val
-        return total, {"l1": float(l1_val.item()), "vgg": float(vgg_val.item())}
+        comps = {"l1": float(l1_val.item())}
+
+        if self.loss_mode == "vgg_redeg":
+            with torch.amp.autocast('cuda', enabled=False):
+                vgg_val = self.vgg(pred.float(), target.float())
+            total = 1.0 * l1_val + 1.0 * vgg_val
+            comps["vgg"] = float(vgg_val.item())
+        elif self.loss_mode == "compound_redeg":
+            mse_val = self.mse(pred, target)
+            ssim_val = 1.0 - compute_ssim_gpu(pred, target)
+            total = 1.0 * l1_val + 0.5 * mse_val + 0.1 * ssim_val
+            comps["mse"] = float(mse_val.item())
+            comps["ssim"] = float(ssim_val)
+        else:  # 'vgg'
+            with torch.amp.autocast('cuda', enabled=False):
+                vgg_val = self.vgg(pred.float(), target.float())
+            total = 1.0 * l1_val + 1.0 * vgg_val
+            comps["vgg"] = float(vgg_val.item())
+
+        # Optical Re-degradation Consistency (Jaffe-McGlamery IFM)
+        if i_redeg is not None and raw_rgb is not None and self.lambda_redeg > 0:
+            redeg_val = self.l1(i_redeg, raw_rgb)
+            total = total + self.lambda_redeg * redeg_val
+            comps["redeg"] = float(redeg_val.item())
+        else:
+            comps["redeg"] = 0.0
+
+        return total, comps
 
 
 # -----------------------------------------------------------------------------
@@ -333,12 +367,19 @@ def run_variant(variant_name: str, in_channels: int, train_pairs, val_pairs, tes
     total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Loaded Model: PhysicsOSANet ({total_params:,} params / {total_params/1e3:.2f}k)", flush=True)
 
-    criterion = ExactL1PlusVGGLoss(target_device=device)
+    use_redeg = (in_channels == 5 and args.lambda_redeg > 0)
+    loss_tag = args.loss_mode if use_redeg else "vgg"
+    criterion = PhysicsCompositeLoss(target_device=device, loss_mode=args.loss_mode, lambda_redeg=args.lambda_redeg if use_redeg else 0.0)
+
+    loss_desc = "1.0*L1 + 1.0*VGG + 0.1*Redeg" if (args.loss_mode == "vgg_redeg" and use_redeg) else (
+        "1.0*L1 + 0.5*MSE + 0.1*SSIM + 0.1*Redeg" if (args.loss_mode == "compound_redeg" and use_redeg) else "1.0*L1 + 1.0*VGG"
+    )
+
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=25, gamma=0.5)
     scaler = torch.amp.GradScaler('cuda', enabled=args.use_amp)
 
-    ckpt_path = Path(args.save_dir) / f"best_{variant_name}_uieb.pth"
+    ckpt_path = Path(args.save_dir) / f"best_{variant_name}_{loss_tag}_uieb.pth"
     ckpt_path.parent.mkdir(parents=True, exist_ok=True)
 
     best_val_psnr = -1.0
@@ -346,22 +387,30 @@ def run_variant(variant_name: str, in_channels: int, train_pairs, val_pairs, tes
     start_train_time = time.time()
 
     if not args.eval_only:
-        print("\n" + "-" * 90, flush=True)
-        print(f"{'Epoch':^10} | {'Train Loss':^12} | {'L1 Loss':^10} | {'VGG Loss':^10} | {'Val PSNR':^14} | {'Val SSIM':^10} | {'Time':^8} | {'Status'}", flush=True)
-        print("-" * 90, flush=True)
+        print("\n" + "-" * 95, flush=True)
+        if use_redeg:
+            print(f"{'Epoch':^10} | {'Train Loss':^10} | {'L1 Loss':^9} | {'Aux Loss':^9} | {'Redeg Loss':^10} | {'Val PSNR':^13} | {'Val SSIM':^9} | {'Time':^7} | {'Status'}", flush=True)
+        else:
+            print(f"{'Epoch':^10} | {'Train Loss':^12} | {'L1 Loss':^10} | {'VGG Loss':^10} | {'Val PSNR':^14} | {'Val SSIM':^10} | {'Time':^8} | {'Status'}", flush=True)
+        print("-" * 95, flush=True)
 
         for epoch in range(1, args.epochs + 1):
             t_ep_start = time.time()
             model.train()
-            running_loss, running_l1, running_vgg = 0.0, 0.0, 0.0
+            running_loss, running_l1, running_aux, running_redeg = 0.0, 0.0, 0.0, 0.0
 
             for inp_t, gt_t in train_loader:
                 inp_t, gt_t = inp_t.to(device), gt_t.to(device)
                 optimizer.zero_grad(set_to_none=True)
 
                 with torch.amp.autocast('cuda', enabled=args.use_amp):
-                    pred = model(inp_t)
-                    loss, comps = criterion(pred, gt_t)
+                    if use_redeg:
+                        pred, i_redeg = model(inp_t, return_degradation=True)
+                        raw_rgb = inp_t[:, :3, :, :]
+                        loss, comps = criterion(pred, gt_t, i_redeg=i_redeg, raw_rgb=raw_rgb)
+                    else:
+                        pred = model(inp_t)
+                        loss, comps = criterion(pred, gt_t)
 
                 scaler.scale(loss).backward()
                 scaler.step(optimizer)
@@ -369,14 +418,16 @@ def run_variant(variant_name: str, in_channels: int, train_pairs, val_pairs, tes
 
                 running_loss += loss.item()
                 running_l1 += comps["l1"]
-                running_vgg += comps["vgg"]
+                running_aux += comps.get("vgg", comps.get("mse", 0.0))
+                running_redeg += comps.get("redeg", 0.0)
 
             scheduler.step()
 
             num_b = len(train_loader)
             train_loss = running_loss / num_b
             train_l1 = running_l1 / num_b
-            train_vgg = running_vgg / num_b
+            train_aux = running_aux / num_b
+            train_redeg = running_redeg / num_b
 
             # Validation
             model.eval()
@@ -401,10 +452,13 @@ def run_variant(variant_name: str, in_channels: int, train_pairs, val_pairs, tes
                 torch.save(model.state_dict(), ckpt_path)
                 status_str = f"--> [BEST SAVED: {best_val_psnr:.3f} dB]"
 
-            print(f"[{epoch:02d}/{args.epochs:02d}]   | {train_loss:^12.4f} | {train_l1:^10.4f} | {train_vgg:^10.4f} | {val_psnr:^11.3f} dB | {val_ssim:^10.4f} | {ep_time:^6.2f}s | {status_str}", flush=True)
+            if use_redeg:
+                print(f"[{epoch:02d}/{args.epochs:02d}]   | {train_loss:^10.4f} | {train_l1:^9.4f} | {train_aux:^9.4f} | {train_redeg:^10.4f} | {val_psnr:^10.3f} dB | {val_ssim:^9.4f} | {ep_time:^5.2f}s | {status_str}", flush=True)
+            else:
+                print(f"[{epoch:02d}/{args.epochs:02d}]   | {train_loss:^12.4f} | {train_l1:^10.4f} | {train_aux:^10.4f} | {val_psnr:^11.3f} dB | {val_ssim:^10.4f} | {ep_time:^6.2f}s | {status_str}", flush=True)
 
         total_train_min = (time.time() - start_train_time) / 60.0
-        print("-" * 90, flush=True)
+        print("-" * 95, flush=True)
         print(f"HOAN THANH TRAIN {variant_name}! Best Val PSNR: {best_val_psnr:.3f} dB (Epoch {best_epoch}). Thoi gian: {total_train_min:.2f} phut", flush=True)
     else:
         print(f"--> [EVAL ONLY] Bo qua train, load checkpoint san co: {ckpt_path}", flush=True)
@@ -434,9 +488,9 @@ def run_variant(variant_name: str, in_channels: int, train_pairs, val_pairs, tes
     bench_results = evaluate_model_benchmarks(model, test_configs, in_channels, device, img_size=args.crop_size)
 
     # 4. Print & Save Results
-    print("\n" + "=" * 130, flush=True)
-    print(f"KET QUA BENCHMARK CHI TIET: {variant_name} (Loss: 1.0*L1 + 1.0*VGG, Train: UIEB)", flush=True)
-    print("=" * 130, flush=True)
+    print("\n" + "=" * 135, flush=True)
+    print(f"KET QUA BENCHMARK CHI TIET: {variant_name} (Loss: {loss_desc}, Train: UIEB)", flush=True)
+    print("=" * 135, flush=True)
 
     header = "| Variant | Kiến trúc kết hợp | Eval Dataset | Loss | Best Val PSNR | PSNR ↑ | SSIM ↑ | CIEDE2000 ↓ | UCIQE ↑ | UIQM ↑ | Params | Flops | Latency | Train Time | Dataset (Train) | Hardware |"
     sep    = "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"
@@ -448,7 +502,7 @@ def run_variant(variant_name: str, in_channels: int, train_pairs, val_pairs, tes
     for idx, r in enumerate(bench_results):
         v_title = f"{variant_name}" if idx == 0 else ""
         arch_t = arch_desc if idx == 0 else ""
-        loss_t = "1.0*L1 + 1.0*VGG" if idx == 0 else ""
+        loss_t = loss_desc if idx == 0 else ""
         b_val = f"{best_val_psnr:.2f} dB" if idx == 0 else ""
         p_cnt = f"{total_params/1e3:.1f}k" if idx == 0 else ""
         f_cnt = flops_str if idx == 0 else ""
@@ -459,13 +513,12 @@ def run_variant(variant_name: str, in_channels: int, train_pairs, val_pairs, tes
         line = f"| {v_title} | {arch_t} | {r['Dataset']} | {loss_t} | {b_val} | {r['PSNR']:.3f} | {r['SSIM']:.4f} | {r['CIEDE2000']:.3f} | {r['UCIQE']:.3f} | {r['UIQM']:.3f} | {p_cnt} | {f_cnt} | {r['Latency_ms']:.2f} ms | {t_time} | {t_dset} | {hw} |"
         print(line)
 
-        # CSV row format matching benchmark_results.csv
         csv_rows.append(f"{idx+1 if idx==0 else ''},{v_title},{arch_t},{r['Dataset']},{loss_t},{b_val},{r['PSNR']:.3f},{r['SSIM']:.4f},{r['CIEDE2000']:.3f},{r['UCIQE']:.4f},{r['UIQM']:.4f},{p_cnt},{f_cnt},16,50,{r['Latency_ms']:.2f} ms,{t_time},{t_dset},{hw}\n")
 
-    print("=" * 130, flush=True)
+    print("=" * 135, flush=True)
 
     # Save to dedicated log file
-    out_csv = Path("results/benchmarks") / f"{variant_name}_uieb_results.csv"
+    out_csv = Path("results/benchmarks") / f"{variant_name}_{loss_tag}_uieb_results.csv"
     out_csv.parent.mkdir(parents=True, exist_ok=True)
     with open(out_csv, "w", encoding="utf-8") as f:
         f.write("#,Variant,Kiến trúc kết hợp,Eval Dataset,Loss,Best Val PSNR,PSNR ↑,SSIM ↑,CIEDE2000 ↓,UCIQE ↑,UIQM ↑,Params,Flops,Batch size,Epochs,Inference time,Training time,Dataset (Train),Data Parallel\n")
@@ -479,8 +532,10 @@ def run_variant(variant_name: str, in_channels: int, train_pairs, val_pairs, tes
 # 8. Main Entrypoint
 # -----------------------------------------------------------------------------
 def main():
-    parser = argparse.ArgumentParser(description="Train and Benchmark PhysicsOSANet (3ch & 5ch) on UIEB with 1.0*L1 + 1.0*VGG Loss")
-    parser.add_argument("--variant", type=str, default="both", choices=["3ch", "5ch", "both"], help="Variant can chay: 3ch, 5ch, hoac both (chay ca 2)")
+    parser = argparse.ArgumentParser(description="Train and Benchmark PhysicsOSANet (3ch & 5ch) on UIEB with Physics Loss Formulations")
+    parser.add_argument("--variant", type=str, default="5ch", choices=["3ch", "5ch", "both"], help="Variant can chay: 3ch, 5ch, hoac both (chay ca 2)")
+    parser.add_argument("--loss_mode", type=str, default="vgg_redeg", choices=["vgg_redeg", "compound_redeg", "vgg"], help="Loss mode: vgg_redeg (1.0*L1+1.0*VGG+0.1*Redeg), compound_redeg (1.0*L1+0.5*MSE+0.1*SSIM+0.1*Redeg), hoac vgg (1.0*L1+1.0*VGG)")
+    parser.add_argument("--lambda_redeg", type=float, default=0.1, help="Trong so re-degradation optical loss (mac dinh: 0.1)")
     parser.add_argument("--epochs", type=int, default=50, help="So epoch huan luyen (mac dinh: 50)")
     parser.add_argument("--batch_size", type=int, default=16, help="Kich thuoc batch (mac dinh: 16)")
     parser.add_argument("--crop_size", type=int, default=256, help="Kich thuoc anh (mac dinh: 256)")
@@ -494,9 +549,9 @@ def main():
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     print("=" * 90, flush=True)
     print(f" UWIR EXPERIMENT RUNNER: M20566-PhysicsNext (PhysicsOSANet)", flush=True)
-    print(f" Device : {device} ({torch.cuda.get_device_name(0) if device.type == 'cuda' else 'CPU'})", flush=True)
-    print(f" PyTorch: {torch.__version__} | CUDA: {torch.version.cuda}", flush=True)
-    print(f" Chon   : Variant={args.variant} | Epochs={args.epochs} | Batch={args.batch_size} | Loss=1.0*L1 + 1.0*VGG", flush=True)
+    print(f" Device   : {device} ({torch.cuda.get_device_name(0) if device.type == 'cuda' else 'CPU'})", flush=True)
+    print(f" PyTorch  : {torch.__version__} | CUDA: {torch.version.cuda}", flush=True)
+    print(f" Setting  : Variant={args.variant} | Epochs={args.epochs} | Batch={args.batch_size} | LossMode={args.loss_mode} (Redeg={args.lambda_redeg})", flush=True)
     print("=" * 90, flush=True)
 
     train_pairs, val_pairs, t90_test_pairs = get_uieb_splits()
