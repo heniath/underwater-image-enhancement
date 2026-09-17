@@ -216,11 +216,15 @@ def _split_train_validation(dataset, seed: int, fraction: float = 0.10):
 
 
 def _subset_manifest(subset) -> list[str]:
-    """Return stable input paths for a Subset when its base exposes them."""
-    base = subset.dataset
-    if hasattr(base, "input_files"):
-        return [str(base.input_files[index]) for index in subset.indices]
-    return [str(index) for index in subset.indices]
+    """Return stable input paths for a Dataset or Subset when it exposes them."""
+    if hasattr(subset, "dataset"):
+        base = subset.dataset
+        if hasattr(base, "input_files"):
+            return [str(base.input_files[index]) for index in subset.indices]
+        return [str(index) for index in subset.indices]
+    if hasattr(subset, "input_files"):
+        return [str(f) for f in subset.input_files]
+    return [str(index) for index in range(len(subset))]
 
 
 # ============================================================
