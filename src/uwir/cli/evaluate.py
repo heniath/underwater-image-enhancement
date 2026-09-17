@@ -194,29 +194,25 @@ def main():
     physics_extractor = _resolve_physics_extractor(args.prior_method)
 
     # ------------------------------------------------------------------
-    # Dataset (built once; each model gets its own DataLoader)
+    # Datasets per benchmark (evaluated separately, never merged)
     # ------------------------------------------------------------------
-    if args.eval_benchmark == "euvp":
-        data_root = args.data_train_euvp
-        print(f"\nLoading EUVP test samples from '{data_root}' …")
-        test_pairs = collect_test_pairs(data_root)
-    elif args.eval_benchmark == "uieb":
-        data_root = args.data_train_uieb
-        print(f"\nLoading UIEB-90 test samples from '{data_root}' …")
-        test_pairs = collect_uieb_test_pairs(data_root, seed=42)
-    elif args.eval_benchmark == "uieb+euvp":
-        data_root = f"UIEB:{args.data_train_uieb},EUVP:{args.data_train_euvp}"
-        print(f"\nLoading combined test samples (UIEB from '{args.data_train_uieb}', EUVP from '{args.data_train_euvp}') …")
+    benchmarks: dict = {}
+    if args.eval_benchmark in ("uieb", "uieb+euvp", "all"):
+        print(f"\nLoading UIEB-90 test samples from '{args.data_train_uieb}' …")
         uieb_pairs = collect_uieb_test_pairs(args.data_train_uieb, seed=42)
-        euvp_pairs = collect_test_pairs(args.data_train_euvp)
-        test_pairs = uieb_pairs + euvp_pairs
-        print(f"Loaded: UIEB (n={len(uieb_pairs)}) + EUVP (n={len(euvp_pairs)})")
-    else:
-        raise ValueError(f"Unknown --eval_benchmark: {args.eval_benchmark}")
+        benchmarks["UIEB"] = uieb_pairs
+        print(f"Loaded: UIEB (n={len(uieb_pairs)})")
 
-    native_ds = TestDataset(test_pairs)
-    legacy_ds = TestDataset(test_pairs, img_size=args.cropSize)
-    print(f"Total Test set size : {len(native_ds)} images")
+    if args.eval_benchmark in ("euvp", "uieb+euvp", "all"):
+        print(f"\nLoading EUVP test samples from '{args.data_train_euvp}' …")
+        euvp_pairs = collect_test_pairs(args.data_train_euvp)
+        benchmarks["EUVP"] = euvp_pairs
+        print(f"Loaded: EUVP (n={len(euvp_pairs)})")
+
+    if not benchmarks:
+        raise ValueError(f"Unknown or empty --eval_benchmark: {args.eval_benchmark}")
+
+    data_root = f"UIEB:{args.data_train_uieb},EUVP:{args.data_train_euvp}"
 
     checkpoint_dir = args.checkpoint_dir
     if not os.path.exists(checkpoint_dir):
@@ -267,51 +263,14 @@ def main():
 
             def make_loader(dataset, batch_size):
                 return data.DataLoader(
-                dataset,
-                batch_size=batch_size,
-                shuffle=False,
-                num_workers=getattr(args, "threads", 0),
-                pin_memory=device.type == "cuda",
-                drop_last=False,
-                collate_fn=collate_fn,
+                    dataset,
+                    batch_size=batch_size,
+                    shuffle=False,
+                    num_workers=getattr(args, "threads", 0),
+                    pin_memory=device.type == "cuda",
+                    drop_last=False,
+                    collate_fn=collate_fn,
                 )
-
-            legacy_loader = make_loader(legacy_ds, args.batchSize)
-            native_loader = make_loader(native_ds, 1)
-
-            legacy_metrics, n_test = evaluate_loader(
-                model, legacy_loader, device, desc=f"Legacy testing {run_name}"
-            )
-            if args.native_eval:
-                test_metrics, n_native = evaluate_loader(
-                    model,
-                    native_loader,
-                    device,
-                    desc=f"Native testing {run_name}",
-                    tile_size=args.tile_size,
-                    tile_overlap=args.tile_overlap,
-                )
-                if n_native != n_test:
-                    raise RuntimeError("Native and legacy evaluation sample counts differ")
-            else:
-                test_metrics = legacy_metrics
-
-            if n_test > 0:
-                print(f"\n  TEST RESULTS  (n={n_test})")
-                print(f"  PSNR      : {test_metrics['psnr']:>8.4f}  dB")
-                print(f"  SSIM      : {test_metrics['ssim']:>8.4f}")
-                print(f"  CIEDE2000 : {test_metrics['ciede2000']:>8.4f}  (lower=better)")
-                print(f"  UCIQE     : {test_metrics['uciqe']:>8.4f}  (higher=better)")
-                print(f"  UIQM      : {test_metrics['uiqm']:>8.4f}  (higher=better)")
-                if "inference_ms_per_img" in test_metrics:
-                    print(f"  Inference : {test_metrics['inference_ms_per_img']:>8.2f}  ms/img")
-            else:
-                print("  [WARN] n=0 — no images were evaluated.")
-                test_metrics = None
-
-            print("\n  STORED CHECKPOINT METRICS:")
-            for k, v in ckpt_metrics.items():
-                print(f"  {k:<9} : {v:>8.4f}")
 
             # --- 1. Compute complexity using thop ---
             macs_g, params_m = None, None
@@ -339,14 +298,48 @@ def main():
                         training_time_min = float(match.group(1))
                         print(f"  Train Time: {training_time_min:>8.2f} min (extracted from log)")
 
+            bench_results: dict = {}
+            for bench_name, bench_pairs in benchmarks.items():
+                native_ds = TestDataset(bench_pairs)
+                legacy_ds = TestDataset(bench_pairs, img_size=args.cropSize)
+
+                legacy_loader = make_loader(legacy_ds, args.batchSize)
+                native_loader = make_loader(native_ds, 1)
+
+                legacy_metrics, n_test = evaluate_loader(
+                    model, legacy_loader, device, desc=f"Legacy testing {run_name} [{bench_name}]"
+                )
+                if args.native_eval:
+                    test_metrics, _ = evaluate_loader(
+                        model,
+                        native_loader,
+                        device,
+                        desc=f"Native testing {run_name} [{bench_name}]",
+                        tile_size=args.tile_size,
+                        tile_overlap=args.tile_overlap,
+                    )
+                else:
+                    test_metrics = legacy_metrics
+
+                print(f"\n  RESULTS ON {bench_name} (n={len(bench_pairs)})")
+                print(f"  PSNR      : {test_metrics['psnr']:>8.4f}  dB")
+                print(f"  SSIM      : {test_metrics['ssim']:>8.4f}")
+                print(f"  CIEDE2000 : {test_metrics['ciede2000']:>8.4f}  (lower=better)")
+                print(f"  UCIQE     : {test_metrics['uciqe']:>8.4f}  (higher=better)")
+                print(f"  UIQM      : {test_metrics['uiqm']:>8.4f}  (higher=better)")
+
+                bench_results[bench_name.lower()] = test_metrics
+
+            primary_bench = "uieb" if "uieb" in bench_results else list(bench_results.keys())[0]
+
             all_results[run_name] = {
                 "model_name": model_name,
                 "in_channels": in_channels,
                 "physics_mode": physics_mode,
                 "best_epoch": ckpt_epoch,
                 "ckpt_metrics": ckpt_metrics,
-                "test_metrics": test_metrics,
-                "test_metrics_legacy_256": legacy_metrics,
+                "test_metrics": bench_results[primary_bench],
+                "benchmarks": bench_results,
                 "macs_g": macs_g,
                 "params_m": params_m,
                 "training_time_min": training_time_min,
@@ -363,9 +356,21 @@ def main():
             }
 
     # ------------------------------------------------------------------
-    # Ranked summary table
+    # Ranked summary table per benchmark
     # ------------------------------------------------------------------
-    _print_summary(all_results)
+    for b_name in benchmarks:
+        b_key = b_name.lower()
+        sub_results = {}
+        for r_name, r_info in all_results.items():
+            if r_info.get("status") == "ok" and b_key in r_info.get("benchmarks", {}):
+                copy_info = dict(r_info)
+                copy_info["test_metrics"] = r_info["benchmarks"][b_key]
+                sub_results[r_name] = copy_info
+        if sub_results:
+            print(f"\n{'=' * 65}")
+            print(f"  RANKED SUMMARY — BENCHMARK: {b_name} (n={len(benchmarks[b_name])})")
+            print(f"{'=' * 65}")
+            _print_summary(sub_results)
 
     # ------------------------------------------------------------------
     # Persist results
