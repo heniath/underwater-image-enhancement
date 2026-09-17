@@ -54,14 +54,17 @@ if torch.cuda.is_available():
 
 # ------------------------------------------------------------------------------
 # 2. Ablation Variant Definitions
-# Format: Name | Num_GPUs | use_l1 | use_perc | use_tv | use_edge | use_lvw | use_uiqm
+# Format: Name | Num_GPUs | use_l1 | use_perc | use_ssim | use_tv | use_edge | use_lvw | use_uiqm | use_hvi
 # ------------------------------------------------------------------------------
 ABLATION_RUNS=(
-    "sgmanet_5ch_uieb_base_tv_1gpu|1|1|1|1|0|0|0"
-    "sgmanet_5ch_uieb_base_tv_2gpu|2|1|1|1|0|0|0"
-    "sgmanet_5ch_uieb_base_edge_2gpu|2|1|1|0|1|0|0"
-    "sgmanet_5ch_uieb_base_lvw_2gpu|2|1|1|0|0|1|0"
-    "sgmanet_5ch_uieb_base_uiqm_2gpu|2|1|1|0|0|0|1"
+    "sgmanet_5ch_uieb_base_only|2|1|1|0|0|0|0|0|0"
+    "sgmanet_5ch_uieb_base_ssim_2gpu|2|1|1|1|0|0|0|0|0"
+    "sgmanet_5ch_uieb_base_hvi_2gpu|2|1|1|0|0|0|0|0|1"
+    "sgmanet_5ch_uieb_base_tv_1gpu|1|1|1|0|1|0|0|0|0"
+    "sgmanet_5ch_uieb_base_tv_2gpu|2|1|1|0|1|0|0|0|0"
+    "sgmanet_5ch_uieb_base_edge_2gpu|2|1|1|0|0|1|0|0|0"
+    "sgmanet_5ch_uieb_base_lvw_2gpu|2|1|1|0|0|0|1|0|0"
+    "sgmanet_5ch_uieb_base_uiqm_2gpu|2|1|1|0|0|0|0|1|0"
 )
 
 TOTAL_RUNS=${#ABLATION_RUNS[@]}
@@ -78,7 +81,7 @@ echo " Start at   : $(date)"
 echo "================================================================="
 
 for run_cfg in "${ABLATION_RUNS[@]}"; do
-    IFS="|" read -r RUN_NAME NUM_GPUS USE_L1 USE_PERC USE_TV USE_EDGE USE_LVW USE_UIQM <<< "${run_cfg}"
+    IFS="|" read -r RUN_NAME NUM_GPUS USE_L1 USE_PERC USE_SSIM USE_TV USE_EDGE USE_LVW USE_UIQM USE_HVI <<< "${run_cfg}"
     RUN_INDEX=$((RUN_INDEX + 1))
     TS=$(date +"%Y%m%d_%H%M%S")
     LOG_FILE="${PROJECT_DIR}/logs/${RUN_NAME}_${TS}.log"
@@ -86,7 +89,7 @@ for run_cfg in "${ABLATION_RUNS[@]}"; do
     echo ""
     echo "-----------------------------------------------------------------"
     echo " [Run ${RUN_INDEX}/${TOTAL_RUNS}] ${RUN_NAME}"
-    echo " GPUs: ${NUM_GPUS} | Toggles: L1=${USE_L1}, Perc=${USE_PERC}, TV=${USE_TV}, Edge=${USE_EDGE}, LVW=${USE_LVW}, UIQM=${USE_UIQM}"
+    echo " GPUs: ${NUM_GPUS} | Toggles: L1=${USE_L1}, Perc=${USE_PERC}, SSIM=${USE_SSIM}, TV=${USE_TV}, Edge=${USE_EDGE}, LVW=${USE_LVW}, UIQM=${USE_UIQM}, HVI=${USE_HVI}"
     echo " Log : ${LOG_FILE}"
     echo "-----------------------------------------------------------------"
 
@@ -106,10 +109,12 @@ for run_cfg in "${ABLATION_RUNS[@]}"; do
         --num_gpus "${NUM_GPUS}" \
         --use_l1 "${USE_L1}" \
         --use_perc "${USE_PERC}" \
+        --use_ssim "${USE_SSIM}" \
         --use_tv "${USE_TV}" \
         --use_edge "${USE_EDGE}" \
         --use_lvw "${USE_LVW}" \
-        --use_uiqm "${USE_UIQM}" 2>&1 | tee "${LOG_FILE}"
+        --use_uiqm "${USE_UIQM}" \
+        --use_hvi "${USE_HVI}" 2>&1 | tee "${LOG_FILE}"
 
     END_T=$(date +%s)
     ELAPSED=$((END_T - START_T))

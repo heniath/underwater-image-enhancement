@@ -214,8 +214,8 @@ def option():
     parser.add_argument(
         "--SSIM_weight",
         type=float,
-        default=0.0,
-        help="λ3 — SSIM loss weight",
+        default=0.1,
+        help="λ_ssim — SSIM loss weight (WWE-UIE / literature default: 0.1)",
     )
     parser.add_argument(
         "--tv_weight",
@@ -240,6 +240,18 @@ def option():
         type=float,
         default=0.05,
         help="λ_uiqm — Differentiable UIQM loss weight (Mamba UWIR default: 0.05)",
+    )
+    parser.add_argument(
+        "--hvi_weight",
+        type=float,
+        default=0.5,
+        help="λ_hvi — WWE-UIE HVI color space loss weight (WWE-UIE default: 0.5)",
+    )
+    parser.add_argument(
+        "--hvi_k",
+        type=float,
+        default=0.2,
+        help="Color sensitivity exponent k for HVI space (WWE-UIE default: 0.2)",
     )
 
     # Simple 0 / 1 toggles for Kaggle ablations
@@ -291,6 +303,13 @@ def option():
         default=0,
         choices=[0, 1],
         help="Toggle UIQM loss (1=enable, 0=disable)",
+    )
+    parser.add_argument(
+        "--use_hvi",
+        type=int,
+        default=0,
+        choices=[0, 1],
+        help="Toggle WWE-UIE HVI color space loss (1=enable, 0=disable)",
     )
     parser.add_argument(
         "--lvw_mode",

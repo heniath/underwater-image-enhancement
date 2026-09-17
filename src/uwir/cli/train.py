@@ -321,6 +321,7 @@ def train_epoch(
         "edge": 0.0,
         "lvw": 0.0,
         "uiqm": 0.0,
+        "hvi": 0.0,
     }
     consecutive_amp_overflows = 0
 
@@ -615,7 +616,9 @@ def main():
         lambda_edge=args.edge_weight,
         lambda_lvw=args.lvw_weight,
         lambda_uiqm=args.uiqm_weight,
+        lambda_hvi=args.hvi_weight,
         lvw_mode=getattr(args, "lvw_mode", "spatial"),
+        density_k=getattr(args, "hvi_k", 0.2),
         use_l1=args.use_l1,
         use_perc=args.use_perc,
         use_ssim=args.use_ssim,
@@ -623,8 +626,19 @@ def main():
         use_edge=args.use_edge,
         use_lvw=args.use_lvw,
         use_uiqm=args.use_uiqm,
+        use_hvi=args.use_hvi,
         device=device,
     )
+    active_losses = []
+    if criterion.eff_l1: active_losses.append(f"L1({criterion.eff_l1})")
+    if criterion.eff_perc: active_losses.append(f"Perc({criterion.eff_perc})")
+    if criterion.eff_ssim: active_losses.append(f"SSIM({criterion.eff_ssim})")
+    if criterion.eff_tv: active_losses.append(f"TV({criterion.eff_tv})")
+    if criterion.eff_edge: active_losses.append(f"Edge({criterion.eff_edge})")
+    if criterion.eff_lvw: active_losses.append(f"LVW({criterion.eff_lvw})")
+    if criterion.eff_uiqm: active_losses.append(f"UIQM({criterion.eff_uiqm})")
+    if criterion.eff_hvi: active_losses.append(f"HVI({criterion.eff_hvi})")
+    print(f"Loss Active: {', '.join(active_losses) if active_losses else 'None'}")
 
     # ------------------------------------------------------------------
     # Optimizer & Scheduler

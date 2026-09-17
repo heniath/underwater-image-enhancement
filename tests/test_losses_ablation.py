@@ -9,13 +9,18 @@ Unit tests for the modular loss ablation suite:
   5. CompositeLoss 0/1 toggle verification
 """
 
-import pytest
+try:
+    import pytest
+except ImportError:
+    pytest = None
 import torch
 
 from uwir.losses import (
     CompositeLoss,
     EdgeLoss,
+    HVILoss,
     LocalVarianceLoss,
+    SSIMLoss,
     TVLoss,
     UIQMLoss,
 )
@@ -88,6 +93,38 @@ def test_uiqm_loss():
     assert torch.isfinite(pred.grad).all()
 
 
+def test_hvi_loss():
+    hvi_loss = HVILoss(density_k=0.2, loss_weight=1.0)
+    pred = torch.rand(2, 3, 64, 64, requires_grad=True)
+    target = torch.rand(2, 3, 64, 64)
+    loss = hvi_loss(pred, target)
+    assert loss.dim() == 0
+    assert torch.isfinite(loss)
+    assert loss.item() >= 0.0
+
+    # Test identical inputs yield zero loss
+    zero_loss = hvi_loss(target, target)
+    assert abs(zero_loss.item()) < 1e-6
+
+    loss.backward()
+    assert pred.grad is not None
+    assert torch.isfinite(pred.grad).all()
+
+
+def test_ssim_loss():
+    ssim_loss = SSIMLoss()
+    pred = torch.rand(2, 3, 64, 64, requires_grad=True)
+    target = torch.rand(2, 3, 64, 64)
+    loss = ssim_loss(pred, target)
+    assert loss.dim() == 0
+    assert torch.isfinite(loss)
+    assert loss.item() >= 0.0
+
+    loss.backward()
+    assert pred.grad is not None
+    assert torch.isfinite(pred.grad).all()
+
+
 def test_composite_loss_toggles():
     # Only base L1
     comp = CompositeLoss(
@@ -95,10 +132,12 @@ def test_composite_loss_toggles():
         lambda_perc=0.0,
         use_l1=1,
         use_perc=0,
+        use_ssim=0,
         use_tv=0,
         use_edge=0,
         use_lvw=0,
         use_uiqm=0,
+        use_hvi=0,
         device="cpu",
     )
     pred = torch.rand(2, 3, 32, 32, requires_grad=True)
@@ -106,31 +145,39 @@ def test_composite_loss_toggles():
     tot, parts = comp(pred, target)
     assert parts["l1"] > 0.0
     assert parts["perceptual"] == 0.0
+    assert parts["ssim_loss"] == 0.0
     assert parts["tv"] == 0.0
     assert parts["edge"] == 0.0
     assert parts["lvw"] == 0.0
     assert parts["uiqm"] == 0.0
+    assert parts["hvi"] == 0.0
 
-    # Toggle on TV, Edge, LVW, UIQM
+    # Toggle on TV, Edge, LVW, UIQM, SSIM, HVI
     comp_all = CompositeLoss(
         lambda_l1=1.0,
         lambda_perc=0.0,
+        lambda_ssim=0.1,
         lambda_tv=0.001,
         lambda_edge=0.1,
         lambda_lvw=0.1,
         lambda_uiqm=0.05,
+        lambda_hvi=0.5,
         use_l1=1,
         use_perc=0,
+        use_ssim=1,
         use_tv=1,
         use_edge=1,
         use_lvw=1,
         use_uiqm=1,
+        use_hvi=1,
         device="cpu",
     )
     tot, parts = comp_all(pred, target)
     assert parts["l1"] > 0.0
+    assert parts["ssim_loss"] > 0.0
     assert parts["tv"] > 0.0
     assert parts["edge"] > 0.0
     assert parts["lvw"] > 0.0
     assert parts["uiqm"] > 0.0
+    assert parts["hvi"] > 0.0
     assert torch.isfinite(tot)

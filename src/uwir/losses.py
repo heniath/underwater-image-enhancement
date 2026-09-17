@@ -402,6 +402,76 @@ class UIQMLoss(nn.Module):
 
 
 # ---------------------------------------------------------------------------
+# HVI (Hue-Value-Intensity) Color Space Loss (WWE-UIE, WACV 2026)
+# ---------------------------------------------------------------------------
+
+
+class HVILoss(nn.Module):
+    """
+    HVI Loss from WWE-UIE (Cheng et al., WACV 2026):
+    "WWE-UIE: A Wavelet & White Balance Efficient Network for Underwater Image Enhancement".
+
+    Transforms RGB images into HVI (Hue, Value, Intensity) space, where color
+    sensitivity C = (sin(I * pi / 2) + eps)^k modulates hue and saturation into
+    Cartesian coordinates (H, V) alongside intensity I.
+    Computes L1 loss between predicted and target HVI representations:
+        L_hvi(Y, Y') = || HVI(Y) - HVI(Y') ||_1
+
+    Args:
+        density_k (float): Color sensitivity modulation factor (WWE-UIE paper default: 0.2).
+        loss_weight (float): Multiplier for the loss (default: 1.0).
+    """
+
+    def __init__(self, density_k: float = 0.2, loss_weight: float = 1.0):
+        super().__init__()
+        self.loss_weight = loss_weight
+        self.register_buffer("density_k", torch.tensor(float(density_k)))
+
+    def rgb_to_hvi(self, img: torch.Tensor) -> torch.Tensor:
+        """
+        Convert RGB image tensor in [0, 1] of shape [B, 3, H, W] to HVI tensor of shape [B, 3, H, W].
+        Matches exact formulation of WWE-UIE without in-place tensor mutations.
+        """
+        eps = 1e-8
+        r = img[:, 0:1, :, :]
+        g = img[:, 1:2, :, :]
+        b = img[:, 2:3, :, :]
+        value = torch.max(img, dim=1, keepdim=True)[0]
+        img_min = torch.min(img, dim=1, keepdim=True)[0]
+        diff = value - img_min + eps
+
+        h_r = ((g - b) / diff) % 6.0
+        h_g = 2.0 + (b - r) / diff
+        h_b = 4.0 + (r - g) / diff
+
+        hue = torch.where(b == value, h_b, torch.zeros_like(r))
+        hue = torch.where(g == value, h_g, hue)
+        hue = torch.where(r == value, h_r, hue)
+        hue = torch.where(value == img_min, torch.zeros_like(hue), hue)
+        hue = hue / 6.0
+
+        saturation = (value - img_min) / (value + eps)
+        saturation = torch.where(value == 0, torch.zeros_like(saturation), saturation)
+
+        pi = 3.141592653589793
+        color_sensitive = (torch.sin(value * 0.5 * pi) + eps).pow(self.density_k)
+        ch = torch.cos(2.0 * pi * hue)
+        cv = torch.sin(2.0 * pi * hue)
+
+        h_coord = color_sensitive * saturation * ch
+        v_coord = color_sensitive * saturation * cv
+        i_coord = value
+        return torch.cat([h_coord, v_coord, i_coord], dim=1)
+
+    def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        # Clamp pred to [0, 1] as in author's official implementation
+        pred_clamped = pred.clamp(0.0, 1.0)
+        pred_hvi = self.rgb_to_hvi(pred_clamped)
+        target_hvi = self.rgb_to_hvi(target)
+        return self.loss_weight * F.l1_loss(pred_hvi, target_hvi)
+
+
+# ---------------------------------------------------------------------------
 # Composite Loss
 # ---------------------------------------------------------------------------
 
@@ -409,24 +479,26 @@ class UIQMLoss(nn.Module):
 class CompositeLoss(nn.Module):
     """
     Weighted combination of pixel fidelity (L1 or Charbonnier), VGG perceptual,
-    SSIM, Total Variation, Edge, Local Variance (MobileIE), and UIQM losses.
+    SSIM, Total Variation, Edge, Local Variance (MobileIE), UIQM, and HVI (WWE-UIE) losses.
 
     Supports simple 0/1 toggles for easy ablation on Kaggle:
-        use_l1, use_perc, use_ssim, use_tv, use_edge, use_lvw, use_uiqm
+        use_l1, use_perc, use_ssim, use_tv, use_edge, use_lvw, use_uiqm, use_hvi
     """
 
     def __init__(
         self,
         lambda_l1: float = 1.0,
         lambda_perc: float = 1.0,
-        lambda_ssim: float = 0.0,
+        lambda_ssim: float = 0.1,
         lambda_color: float = 0.0,
         lambda_wavelet: float = 0.0,
         lambda_tv: float = 0.001,
         lambda_edge: float = 0.1,
         lambda_lvw: float = 0.1,
         lambda_uiqm: float = 0.05,
+        lambda_hvi: float = 0.5,
         lvw_mode: str = "spatial",
+        density_k: float = 0.2,
         use_l1: int = 1,
         use_perc: int = 1,
         use_ssim: int = 0,
@@ -436,6 +508,7 @@ class CompositeLoss(nn.Module):
         use_edge: int = 0,
         use_lvw: int = 0,
         use_uiqm: int = 0,
+        use_hvi: int = 0,
         use_charbonnier: bool = False,
         device: str | torch.device = "cpu",
     ):
@@ -450,6 +523,7 @@ class CompositeLoss(nn.Module):
         self.eff_edge = float(lambda_edge) if int(use_edge) else 0.0
         self.eff_lvw = float(lambda_lvw) if int(use_lvw) else 0.0
         self.eff_uiqm = float(lambda_uiqm) if int(use_uiqm) else 0.0
+        self.eff_hvi = float(lambda_hvi) if int(use_hvi) else 0.0
 
         self.use_charbonnier = use_charbonnier
         self.l1 = (CharbonnierLoss() if use_charbonnier else nn.L1Loss()) if self.eff_l1 else None
@@ -461,6 +535,7 @@ class CompositeLoss(nn.Module):
         self.edge = EdgeLoss(loss_weight=1.0) if self.eff_edge else None
         self.lvw = LocalVarianceLoss(mode=lvw_mode, kernel_size=7, loss_weight=1.0) if self.eff_lvw else None
         self.uiqm = UIQMLoss(loss_weight=1.0) if self.eff_uiqm else None
+        self.hvi = HVILoss(density_k=density_k, loss_weight=1.0) if self.eff_hvi else None
 
     def forward(
         self,
@@ -519,6 +594,13 @@ class CompositeLoss(nn.Module):
         else:
             parts["uiqm"] = 0.0
 
+        if self.hvi is not None and self.eff_hvi:
+            l_hvi = self.hvi(pred, target)
+            total = total + self.eff_hvi * l_hvi
+            parts["hvi"] = l_hvi.item()
+        else:
+            parts["hvi"] = 0.0
+
         if self.color is not None and self.eff_color:
             l_color = self.color(pred, target)
             total = total + self.eff_color * l_color
@@ -542,6 +624,7 @@ __all__ = [
     "ColorAngleLoss",
     "CompositeLoss",
     "EdgeLoss",
+    "HVILoss",
     "LocalVarianceLoss",
     "OutlierAwareLoss",
     "SSIMLoss",
