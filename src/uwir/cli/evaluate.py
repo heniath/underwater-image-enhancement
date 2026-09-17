@@ -205,6 +205,7 @@ def main():
         print(f"\nLoading UIEB-90 test samples from '{data_root}' …")
         test_pairs = collect_uieb_test_pairs(data_root, seed=42)
     elif args.eval_benchmark == "uieb+euvp":
+        data_root = f"UIEB:{args.data_train_uieb},EUVP:{args.data_train_euvp}"
         print(f"\nLoading combined test samples (UIEB from '{args.data_train_uieb}', EUVP from '{args.data_train_euvp}') …")
         uieb_pairs = collect_uieb_test_pairs(args.data_train_uieb, seed=42)
         euvp_pairs = collect_test_pairs(args.data_train_euvp)
