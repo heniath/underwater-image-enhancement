@@ -77,6 +77,9 @@ logs/*
 !logs/.gitkeep
 results/*
 !results/.gitkeep
+!results/*.json
+!results/*.md
+!results/*.csv
 *.log
 *.done
 

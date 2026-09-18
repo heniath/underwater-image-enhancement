@@ -1,0 +1,280 @@
+{
+  "metadata": {
+    "project": "sgmanet_loss_ablations",
+    "architecture": "SGMA-Net (5ch RGB+t+B)",
+    "train_dataset": "UIEB 800 (raw-890 + reference-890)",
+    "benchmarks": {
+      "combined": 605,
+      "uieb_90": 90,
+      "euvp_515": 515
+    },
+    "training_hyperparams": {
+      "epochs": 100,
+      "batch_size": 16,
+      "crop_size": 256,
+      "lr": 0.0001,
+      "amp": true
+    }
+  },
+  "variants": [
+    {
+      "id": 1,
+      "name": "Pure Base",
+      "formula": "1.0 * L1 + 1.0 * L_perc",
+      "weights": {
+        "l1": 1.0,
+        "perc": 1.0
+      },
+      "best_epoch": 97,
+      "train_time_min": 78.5,
+      "val_metrics": {
+        "psnr": 22.588,
+        "ssim": 0.8949
+      },
+      "test_combined_605": {
+        "psnr": 20.041,
+        "ssim": 0.8228,
+        "ciede2000": 11.3886,
+        "uciqe": 30.2198,
+        "uiqm": 1.9683
+      },
+      "test_uieb_90": {
+        "psnr": 22.4298,
+        "ssim": 0.9032,
+        "ciede2000": 9.1206,
+        "uciqe": 27.866,
+        "uiqm": 1.7076
+      },
+      "test_euvp_515": {
+        "psnr": 19.6236,
+        "ssim": 0.8088,
+        "ciede2000": 11.785,
+        "uciqe": 30.6311,
+        "uiqm": 2.0138
+      }
+    },
+    {
+      "id": 2,
+      "name": "Base + Edge Loss (Burt & Adelson 1983)",
+      "formula": "1.0 * L1 + 1.0 * L_perc + 0.1 * L_edge",
+      "weights": {
+        "l1": 1.0,
+        "perc": 1.0,
+        "edge": 0.1
+      },
+      "best_epoch": 96,
+      "train_time_min": 81.7,
+      "val_metrics": {
+        "psnr": 22.629,
+        "ssim": 0.8965
+      },
+      "test_combined_605": {
+        "psnr": 20.0954,
+        "ssim": 0.8228,
+        "ciede2000": 11.3044,
+        "uciqe": 30.2464,
+        "uiqm": 1.9709
+      },
+      "test_uieb_90": {
+        "psnr": 22.295,
+        "ssim": 0.9019,
+        "ciede2000": 9.2275,
+        "uciqe": 28.0189,
+        "uiqm": 1.7139
+      },
+      "test_euvp_515": {
+        "psnr": 19.711,
+        "ssim": 0.8089,
+        "ciede2000": 11.6674,
+        "uciqe": 30.6357,
+        "uiqm": 2.0158
+      }
+    },
+    {
+      "id": 3,
+      "name": "Base + MobileIE LVW (Yan et al. 2025)",
+      "formula": "1.0 * L1 + 1.0 * L_perc + 0.1 * L_lvw",
+      "weights": {
+        "l1": 1.0,
+        "perc": 1.0,
+        "lvw": 0.1
+      },
+      "best_epoch": 92,
+      "train_time_min": 74.4,
+      "val_metrics": {
+        "psnr": 22.5427,
+        "ssim": 0.8956
+      },
+      "test_combined_605": {
+        "psnr": 19.9835,
+        "ssim": 0.8216,
+        "ciede2000": 11.2683,
+        "uciqe": 30.352,
+        "uiqm": 1.9792
+      },
+      "test_uieb_90": {
+        "psnr": 22.3512,
+        "ssim": 0.9026,
+        "ciede2000": 9.3539,
+        "uciqe": 27.828,
+        "uiqm": 1.7008
+      },
+      "test_euvp_515": {
+        "psnr": 19.5697,
+        "ssim": 0.8074,
+        "ciede2000": 11.6029,
+        "uciqe": 30.7931,
+        "uiqm": 2.0279
+      }
+    },
+    {
+      "id": 4,
+      "name": "Base + Differentiable UIQM (Panetta 2016 / Mamba UWIR 2026)",
+      "formula": "1.0 * L1 + 1.0 * L_perc + 0.05 * L_uiqm",
+      "weights": {
+        "l1": 1.0,
+        "perc": 1.0,
+        "uiqm": 0.05
+      },
+      "best_epoch": 89,
+      "train_time_min": 79.1,
+      "val_metrics": {
+        "psnr": 22.4465,
+        "ssim": 0.8947
+      },
+      "test_combined_605": {
+        "psnr": 19.8019,
+        "ssim": 0.8189,
+        "ciede2000": 11.3897,
+        "uciqe": 30.4971,
+        "uiqm": 1.9996
+      },
+      "test_uieb_90": {
+        "psnr": 22.2198,
+        "ssim": 0.9009,
+        "ciede2000": 9.2726,
+        "uciqe": 28.1729,
+        "uiqm": 1.7437
+      },
+      "test_euvp_515": {
+        "psnr": 19.3793,
+        "ssim": 0.8045,
+        "ciede2000": 11.7597,
+        "uciqe": 30.9032,
+        "uiqm": 2.0444
+      }
+    },
+    {
+      "id": 5,
+      "name": "Base + SSIM Loss (Wang et al. / WWE-UIE)",
+      "formula": "1.0 * L1 + 1.0 * L_perc + 0.1 * L_ssim",
+      "weights": {
+        "l1": 1.0,
+        "perc": 1.0,
+        "ssim": 0.1
+      },
+      "best_epoch": 2,
+      "train_time_min": 17.6,
+      "val_metrics": {
+        "psnr": 17.3028,
+        "ssim": 0.7876
+      },
+      "test_combined_605": {
+        "psnr": 20.7492,
+        "ssim": 0.813,
+        "ciede2000": 11.8948,
+        "uciqe": 26.3212,
+        "uiqm": 1.6592
+      },
+      "test_uieb_90": {
+        "psnr": 17.4778,
+        "ssim": 0.7889,
+        "ciede2000": 15.0652,
+        "uciqe": 23.7018,
+        "uiqm": 1.3621
+      },
+      "test_euvp_515": {
+        "psnr": 21.321,
+        "ssim": 0.8172,
+        "ciede2000": 11.3408,
+        "uciqe": 26.779,
+        "uiqm": 1.7111
+      }
+    },
+    {
+      "id": 6,
+      "name": "Base + WWE-UIE HVI Color Loss (Cheng et al. WACV 2026)",
+      "formula": "1.0 * L1 + 1.0 * L_perc + 0.5 * L_hvi",
+      "weights": {
+        "l1": 1.0,
+        "perc": 1.0,
+        "hvi": 0.5
+      },
+      "best_epoch": 85,
+      "train_time_min": 76.1,
+      "val_metrics": {
+        "psnr": 22.317,
+        "ssim": 0.8942
+      },
+      "test_combined_605": {
+        "psnr": 19.8252,
+        "ssim": 0.8201,
+        "ciede2000": 11.4791,
+        "uciqe": 30.4093,
+        "uiqm": 1.9811
+      },
+      "test_uieb_90": {
+        "psnr": 22.2012,
+        "ssim": 0.8998,
+        "ciede2000": 9.3577,
+        "uciqe": 27.8985,
+        "uiqm": 1.7084
+      },
+      "test_euvp_515": {
+        "psnr": 19.41,
+        "ssim": 0.8062,
+        "ciede2000": 11.8498,
+        "uciqe": 30.848,
+        "uiqm": 2.0288
+      }
+    },
+    {
+      "id": 7,
+      "name": "Base + Adapt-PEFT Laplacian Pyramid Loss (Malik & Martinel ICPR 2026)",
+      "formula": "1.0 * L1 + 1.0 * L_perc + 1.0 * L_lappyr",
+      "weights": {
+        "l1": 1.0,
+        "perc": 1.0,
+        "lap_pyr": 1.0,
+        "levels": 3
+      },
+      "best_epoch": 89,
+      "train_time_min": 87.2,
+      "val_metrics": {
+        "psnr": 22.353,
+        "ssim": 0.8692
+      },
+      "test_combined_605": {
+        "psnr": 19.3231,
+        "ssim": 0.8011,
+        "ciede2000": 12.0174,
+        "uciqe": 30.637,
+        "uiqm": 1.9085
+      },
+      "test_uieb_90": {
+        "psnr": 22.2461,
+        "ssim": 0.8755,
+        "ciede2000": 9.4566,
+        "uciqe": 28.4892,
+        "uiqm": 1.7056
+      },
+      "test_euvp_515": {
+        "psnr": 18.8123,
+        "ssim": 0.7881,
+        "ciede2000": 12.4649,
+        "uciqe": 31.0124,
+        "uiqm": 1.944
+      }
+    }
+  ]
+}
