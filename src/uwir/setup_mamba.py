@@ -29,6 +29,19 @@ KNOWN_WHEELS = {
         "https://github.com/Dao-AILab/causal-conv1d/releases/download/v1.7.0/causal_conv1d-1.7.0%2Bcu12torch2.6cxx11abiTRUE-cp312-cp312-linux_x86_64.whl",
         "https://github.com/state-spaces/mamba/releases/download/v2.3.2.post1/mamba_ssm-2.3.2.post1%2Bcu12torch2.6cxx11abiTRUE-cp312-cp312-linux_x86_64.whl",
     ),
+    # Python 3.11, CUDA 12, ABI True
+    ("cp311", "2.4", "cu12"): (
+        "https://github.com/Dao-AILab/causal-conv1d/releases/download/v1.5.4/causal_conv1d-1.5.4%2Bcu12torch2.4cxx11abiTRUE-cp311-cp311-linux_x86_64.whl",
+        "https://github.com/state-spaces/mamba/releases/download/v2.3.0/mamba_ssm-2.3.0%2Bcu12torch2.4cxx11abiTRUE-cp311-cp311-linux_x86_64.whl",
+    ),
+    ("cp311", "2.5", "cu12"): (
+        "https://github.com/Dao-AILab/causal-conv1d/releases/download/v1.6.0/causal_conv1d-1.6.0%2Bcu12torch2.5cxx11abiTRUE-cp311-cp311-linux_x86_64.whl",
+        "https://github.com/state-spaces/mamba/releases/download/v2.3.0/mamba_ssm-2.3.0%2Bcu12torch2.5cxx11abiTRUE-cp311-cp311-linux_x86_64.whl",
+    ),
+    ("cp311", "2.6", "cu12"): (
+        "https://github.com/Dao-AILab/causal-conv1d/releases/download/v1.7.0/causal_conv1d-1.7.0%2Bcu12torch2.6cxx11abiTRUE-cp311-cp311-linux_x86_64.whl",
+        "https://github.com/state-spaces/mamba/releases/download/v2.3.2.post1/mamba_ssm-2.3.2.post1%2Bcu12torch2.6cxx11abiTRUE-cp311-cp311-linux_x86_64.whl",
+    ),
     # Python 3.10, CUDA 12, ABI True
     ("cp310", "2.4", "cu12"): (
         "https://github.com/Dao-AILab/causal-conv1d/releases/download/v1.5.4/causal_conv1d-1.5.4%2Bcu12torch2.4cxx11abiTRUE-cp310-cp310-linux_x86_64.whl",
