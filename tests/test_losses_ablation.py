@@ -19,6 +19,7 @@ from uwir.losses import (
     CompositeLoss,
     EdgeLoss,
     HVILoss,
+    LaplacianPyramidLoss,
     LocalVarianceLoss,
     SSIMLoss,
     TVLoss,
@@ -125,6 +126,20 @@ def test_ssim_loss():
     assert torch.isfinite(pred.grad).all()
 
 
+def test_laplacian_pyramid_loss():
+    lap_pyr = LaplacianPyramidLoss(num_levels=3, loss_weight=1.0)
+    pred = torch.rand(2, 3, 64, 64, requires_grad=True)
+    target = torch.rand(2, 3, 64, 64)
+    loss = lap_pyr(pred, target)
+    assert loss.dim() == 0
+    assert torch.isfinite(loss)
+    assert loss.item() >= 0.0
+
+    loss.backward()
+    assert pred.grad is not None
+    assert torch.isfinite(pred.grad).all()
+
+
 def test_composite_loss_toggles():
     # Only base L1
     comp = CompositeLoss(
@@ -138,6 +153,7 @@ def test_composite_loss_toggles():
         use_lvw=0,
         use_uiqm=0,
         use_hvi=0,
+        use_lap_pyr=0,
         device="cpu",
     )
     pred = torch.rand(2, 3, 32, 32, requires_grad=True)
@@ -151,8 +167,9 @@ def test_composite_loss_toggles():
     assert parts["lvw"] == 0.0
     assert parts["uiqm"] == 0.0
     assert parts["hvi"] == 0.0
+    assert parts["lap_pyr"] == 0.0
 
-    # Toggle on TV, Edge, LVW, UIQM, SSIM, HVI
+    # Toggle on TV, Edge, LVW, UIQM, SSIM, HVI, LapPyr
     comp_all = CompositeLoss(
         lambda_l1=1.0,
         lambda_perc=0.0,
@@ -162,6 +179,7 @@ def test_composite_loss_toggles():
         lambda_lvw=0.1,
         lambda_uiqm=0.05,
         lambda_hvi=0.5,
+        lambda_lap_pyr=1.0,
         use_l1=1,
         use_perc=0,
         use_ssim=1,
@@ -170,6 +188,7 @@ def test_composite_loss_toggles():
         use_lvw=1,
         use_uiqm=1,
         use_hvi=1,
+        use_lap_pyr=1,
         device="cpu",
     )
     tot, parts = comp_all(pred, target)
@@ -180,4 +199,5 @@ def test_composite_loss_toggles():
     assert parts["lvw"] > 0.0
     assert parts["uiqm"] > 0.0
     assert parts["hvi"] > 0.0
+    assert parts["lap_pyr"] > 0.0
     assert torch.isfinite(tot)

@@ -322,6 +322,7 @@ def train_epoch(
         "lvw": 0.0,
         "uiqm": 0.0,
         "hvi": 0.0,
+        "lap_pyr": 0.0,
     }
     consecutive_amp_overflows = 0
 
@@ -617,6 +618,8 @@ def main():
         lambda_lvw=args.lvw_weight,
         lambda_uiqm=args.uiqm_weight,
         lambda_hvi=args.hvi_weight,
+        lambda_lap_pyr=getattr(args, "lap_pyr_weight", 1.0),
+        lap_pyr_levels=getattr(args, "lap_pyr_levels", 3),
         lvw_mode=getattr(args, "lvw_mode", "spatial"),
         density_k=getattr(args, "hvi_k", 0.2),
         use_l1=args.use_l1,
@@ -627,6 +630,7 @@ def main():
         use_lvw=args.use_lvw,
         use_uiqm=args.use_uiqm,
         use_hvi=args.use_hvi,
+        use_lap_pyr=getattr(args, "use_lap_pyr", 0),
         device=device,
     )
     active_losses = []
@@ -638,6 +642,7 @@ def main():
     if criterion.eff_lvw: active_losses.append(f"LVW({criterion.eff_lvw})")
     if criterion.eff_uiqm: active_losses.append(f"UIQM({criterion.eff_uiqm})")
     if criterion.eff_hvi: active_losses.append(f"HVI({criterion.eff_hvi})")
+    if criterion.eff_lap_pyr: active_losses.append(f"LapPyr({criterion.eff_lap_pyr})")
     print(f"Loss Active: {', '.join(active_losses) if active_losses else 'None'}")
 
     # ------------------------------------------------------------------

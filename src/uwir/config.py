@@ -253,6 +253,18 @@ def option():
         default=0.2,
         help="Color sensitivity exponent k for HVI space (WWE-UIE default: 0.2)",
     )
+    parser.add_argument(
+        "--lap_pyr_weight",
+        type=float,
+        default=1.0,
+        help="λ_lap_pyr — Adapt-PEFT Laplacian Pyramid Loss weight (Eq. 9, default: 1.0)",
+    )
+    parser.add_argument(
+        "--lap_pyr_levels",
+        type=int,
+        default=3,
+        help="Number of pyramid decomposition levels for Laplacian Loss (default: 3)",
+    )
 
     # Simple 0 / 1 toggles for Kaggle ablations
     parser.add_argument(
@@ -310,6 +322,13 @@ def option():
         default=0,
         choices=[0, 1],
         help="Toggle WWE-UIE HVI color space loss (1=enable, 0=disable)",
+    )
+    parser.add_argument(
+        "--use_lap_pyr",
+        type=int,
+        default=0,
+        choices=[0, 1],
+        help="Toggle Adapt-PEFT Laplacian Pyramid loss (1=enable, 0=disable)",
     )
     parser.add_argument(
         "--lvw_mode",

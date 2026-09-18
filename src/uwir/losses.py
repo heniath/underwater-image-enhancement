@@ -472,6 +472,80 @@ class HVILoss(nn.Module):
 
 
 # ---------------------------------------------------------------------------
+# Laplacian Pyramid Loss (Adapt-PEFT, Malik & Martinel, ICPR 2026)
+# Section 3.5, Eq. (9):
+#     L_Lap = \sum_{j=0}^K 2^{2j} || L_j(I*) - L_j(\hat{I}) ||_1
+# ---------------------------------------------------------------------------
+
+
+class LaplacianPyramidLoss(nn.Module):
+    """
+    Laplacian Pyramid Loss from Adapt-PEFT (Malik & Martinel, ICPR 2026).
+    Paper Section 3.5, Equation (9):
+        L_Lap = \\sum_{j=0}^K 2^{2j} || L_j(I^*) - L_j(\\hat{I}) ||_1
+
+    Decomposes both images into frequency bands using Laplacian operators and
+    minimizes differences at each pyramid level with 2^(2j) exponential weighting
+    to emphasize structural information across multiple spatial scales.
+
+    Args:
+        num_levels (int): Number of pyramid decomposition levels (default: 3).
+        loss_weight (float): Multiplier for the total loss (default: 1.0).
+    """
+
+    def __init__(self, num_levels: int = 3, loss_weight: float = 1.0):
+        super().__init__()
+        self.num_levels = num_levels
+        self.loss_weight = loss_weight
+        # 5x5 Gaussian kernel (Burt & Adelson 1983)
+        k = torch.tensor([1.0, 4.0, 6.0, 4.0, 1.0], dtype=torch.float32) / 16.0
+        kernel = torch.outer(k, k).unsqueeze(0).unsqueeze(0).repeat(3, 1, 1, 1)
+        self.register_buffer("kernel", kernel)
+
+    def _conv_gauss(self, img: torch.Tensor) -> torch.Tensor:
+        n_channels = img.shape[1]
+        kernel = self.kernel
+        if kernel.shape[0] != n_channels:
+            kernel = kernel[:1].repeat(n_channels, 1, 1, 1)
+        img = F.pad(img, (2, 2, 2, 2), mode="reflect")
+        return F.conv2d(img, kernel.to(img.device, img.dtype), groups=n_channels)
+
+    def _downsample(self, x: torch.Tensor) -> torch.Tensor:
+        return x[:, :, ::2, ::2]
+
+    def _upsample(self, x: torch.Tensor, target_shape: tuple[int, int]) -> torch.Tensor:
+        b, c, h, w = x.shape
+        up = torch.zeros(b, c, h * 2, w * 2, device=x.device, dtype=x.dtype)
+        up[:, :, ::2, ::2] = x * 4.0
+        up = self._conv_gauss(up)
+        if up.shape[2:] != target_shape:
+            up = F.interpolate(up, size=target_shape, mode="bilinear", align_corners=False)
+        return up
+
+    def _build_pyramid(self, img: torch.Tensor) -> list[torch.Tensor]:
+        current = img
+        pyr = []
+        for _ in range(self.num_levels):
+            filtered = self._conv_gauss(current)
+            down = self._downsample(filtered)
+            up = self._upsample(down, current.shape[2:])
+            diff = current - up
+            pyr.append(diff)
+            current = down
+        pyr.append(current)  # lowest-frequency residual base band
+        return pyr
+
+    def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        pyr_pred = self._build_pyramid(pred)
+        pyr_target = self._build_pyramid(target)
+        loss = torch.zeros(1, device=pred.device, dtype=pred.dtype).squeeze()
+        for j, (p, t) in enumerate(zip(pyr_pred, pyr_target)):
+            w = float(2 ** (2 * j))
+            loss = loss + w * F.l1_loss(p, t)
+        return self.loss_weight * loss
+
+
+# ---------------------------------------------------------------------------
 # Composite Loss
 # ---------------------------------------------------------------------------
 
@@ -479,10 +553,11 @@ class HVILoss(nn.Module):
 class CompositeLoss(nn.Module):
     """
     Weighted combination of pixel fidelity (L1 or Charbonnier), VGG perceptual,
-    SSIM, Total Variation, Edge, Local Variance (MobileIE), UIQM, and HVI (WWE-UIE) losses.
+    SSIM, Total Variation, Edge, Local Variance (MobileIE), UIQM, HVI (WWE-UIE),
+    and Laplacian Pyramid (Adapt-PEFT) losses.
 
     Supports simple 0/1 toggles for easy ablation on Kaggle:
-        use_l1, use_perc, use_ssim, use_tv, use_edge, use_lvw, use_uiqm, use_hvi
+        use_l1, use_perc, use_ssim, use_tv, use_edge, use_lvw, use_uiqm, use_hvi, use_lap_pyr
     """
 
     def __init__(
@@ -497,6 +572,8 @@ class CompositeLoss(nn.Module):
         lambda_lvw: float = 0.1,
         lambda_uiqm: float = 0.05,
         lambda_hvi: float = 0.5,
+        lambda_lap_pyr: float = 1.0,
+        lap_pyr_levels: int = 3,
         lvw_mode: str = "spatial",
         density_k: float = 0.2,
         use_l1: int = 1,
@@ -509,6 +586,7 @@ class CompositeLoss(nn.Module):
         use_lvw: int = 0,
         use_uiqm: int = 0,
         use_hvi: int = 0,
+        use_lap_pyr: int = 0,
         use_charbonnier: bool = False,
         device: str | torch.device = "cpu",
     ):
@@ -524,6 +602,7 @@ class CompositeLoss(nn.Module):
         self.eff_lvw = float(lambda_lvw) if int(use_lvw) else 0.0
         self.eff_uiqm = float(lambda_uiqm) if int(use_uiqm) else 0.0
         self.eff_hvi = float(lambda_hvi) if int(use_hvi) else 0.0
+        self.eff_lap_pyr = float(lambda_lap_pyr) if int(use_lap_pyr) else 0.0
 
         self.use_charbonnier = use_charbonnier
         self.l1 = (CharbonnierLoss() if use_charbonnier else nn.L1Loss()) if self.eff_l1 else None
@@ -536,6 +615,7 @@ class CompositeLoss(nn.Module):
         self.lvw = LocalVarianceLoss(mode=lvw_mode, kernel_size=7, loss_weight=1.0) if self.eff_lvw else None
         self.uiqm = UIQMLoss(loss_weight=1.0) if self.eff_uiqm else None
         self.hvi = HVILoss(density_k=density_k, loss_weight=1.0) if self.eff_hvi else None
+        self.lap_pyr = LaplacianPyramidLoss(num_levels=lap_pyr_levels, loss_weight=1.0) if self.eff_lap_pyr else None
 
     def forward(
         self,
@@ -601,6 +681,13 @@ class CompositeLoss(nn.Module):
         else:
             parts["hvi"] = 0.0
 
+        if self.lap_pyr is not None and self.eff_lap_pyr:
+            l_lap_pyr = self.lap_pyr(pred, target)
+            total = total + self.eff_lap_pyr * l_lap_pyr
+            parts["lap_pyr"] = l_lap_pyr.item()
+        else:
+            parts["lap_pyr"] = 0.0
+
         if self.color is not None and self.eff_color:
             l_color = self.color(pred, target)
             total = total + self.eff_color * l_color
@@ -625,6 +712,7 @@ __all__ = [
     "CompositeLoss",
     "EdgeLoss",
     "HVILoss",
+    "LaplacianPyramidLoss",
     "LocalVarianceLoss",
     "OutlierAwareLoss",
     "SSIMLoss",
