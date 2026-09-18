@@ -389,7 +389,7 @@ def main():
             "crop_size": args.cropSize,
             "seed": args.seed,
             "benchmark": args.eval_benchmark,
-            "pair_manifest": test_pairs,
+            "pair_manifest": {b_name: len(pairs) for b_name, pairs in benchmarks.items()},
             "metric_version": 2,
         },
         "runs": all_results,
