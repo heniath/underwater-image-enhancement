@@ -64,6 +64,24 @@ try:
     else:
         write_log("[WARNING] EUVP dataset not directly found under /kaggle/input")
 
+    # Locate UIEB dataset automatically under /kaggle/input
+    uieb_candidates = [
+        Path("/kaggle/input/uieb-dataset/UIEB"),
+        Path("/kaggle/input/uieb-dataset"),
+        Path("/kaggle/input/larjeck/uieb-dataset-raw"),
+    ]
+    uieb_root = next((p for p in uieb_candidates if (p / "raw-890").exists()), None)
+    if uieb_root is None:
+        raw_matches = list(Path("/kaggle/input").glob("**/raw-890"))
+        if raw_matches:
+            uieb_root = raw_matches[0].parent
+    if uieb_root is not None:
+        os.environ["UIEB_ROOT"] = str(uieb_root)
+        os.environ["DATA_UIEB"] = str(uieb_root)
+        write_log(f"UIEB dataset located at: {uieb_root}")
+    else:
+        write_log("[WARNING] UIEB dataset not directly found under /kaggle/input")
+
 {% for command in setup_commands %}
     run({{ command }})
 {% endfor %}
