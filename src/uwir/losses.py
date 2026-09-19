@@ -165,3 +165,29 @@ class CompositeLoss(nn.Module):
             "total": total.item(),
         }
         return total, parts
+
+
+class PhysicsConsistentLoss(nn.Module):
+    """Supervise enhancement and wavelength-aware underwater reconstruction."""
+
+    def __init__(
+        self,
+        enhancement_loss: CompositeLoss,
+        lambda_reconstruction: float = 1.0,
+    ):
+        super().__init__()
+        if lambda_reconstruction < 0:
+            raise ValueError("lambda_reconstruction must be non-negative")
+        self.enhancement_loss = enhancement_loss
+        self.lambda_reconstruction = lambda_reconstruction
+
+    def forward(self, output, target: torch.Tensor, input_image: torch.Tensor | None = None):
+        if input_image is None:
+            raise ValueError("PhysicsConsistentLoss requires the original underwater input")
+
+        enhancement, parts = self.enhancement_loss(output.enhanced, target)
+        reconstruction = F.l1_loss(output.reconstructed, input_image)
+        total = enhancement + self.lambda_reconstruction * reconstruction
+        parts["reconstruction"] = reconstruction.item()
+        parts["total"] = total.item()
+        return total, parts

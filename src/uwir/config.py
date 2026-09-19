@@ -185,6 +185,7 @@ def option():
             "Model variant (backbone_channels):\n"
             "  Channels: 3ch=RGB only | 4ch_t=RGB+t(x) | 4ch_b=RGB+B | 5ch=RGB+t(x)+B\n"
             "  V2: 6ch_b=RGB+B_RGB | 7ch=RGB+t(x)+B_RGB\n"
+            "  End-to-end: learnable_physics_unet learns T_RGB and B_RGB from RGB\n"
             "  Backbones: unet | uwlyt | uwlyttiny | uwlytv2 | uwlytv2tiny"
         ),
     )
@@ -215,6 +216,12 @@ def option():
         type=float,
         default=0.0,
         help="λ3 — SSIM loss weight",
+    )
+    parser.add_argument(
+        "--reconstruction_weight",
+        type=float,
+        default=1.0,
+        help="Weight of input reconstruction loss for learnable_physics_unet",
     )
 
     # ------------------------------------------------------------------

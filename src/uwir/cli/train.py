@@ -281,7 +281,7 @@ def train_epoch(
 ):
     model.train()
     tot_loss = 0.0
-    comps = {"l1": 0.0, "perceptual": 0.0, "ssim_loss": 0.0}
+    comps = {"l1": 0.0, "perceptual": 0.0, "ssim_loss": 0.0, "reconstruction": 0.0}
     consecutive_amp_overflows = 0
 
     # BỎ TQDM, DÙNG ENUMERATE THÔNG THƯỜNG
@@ -291,8 +291,9 @@ def train_epoch(
             optimizer.zero_grad(set_to_none=True)
         amp_enabled = scaler is not None and scaler.is_enabled()
         with torch.autocast(device_type=device.type, enabled=amp_enabled):
-            pred = model(inp)
-            loss, parts = criterion(pred, gt)
+            uses_physics_loss = getattr(_unwrap(model), "supports_physics_loss", False)
+            pred = model(inp, return_physics=True) if uses_physics_loss else model(inp)
+            loss, parts = criterion(pred, gt, inp) if uses_physics_loss else criterion(pred, gt)
         if not torch.isfinite(loss):
             raise FloatingPointError(
                 f"Non-finite training loss at batch {batch_idx + 1}: {loss.item()}"
@@ -363,8 +364,9 @@ def val_loss_epoch(model, loader, criterion, device, amp_enabled: bool = False):
     for batch_idx, (inp, gt) in enumerate(loader):
         inp, gt = inp.to(device), gt.to(device)
         with torch.autocast(device_type=device.type, enabled=amp_enabled):
-            pred = model(inp)
-            loss, _ = criterion(pred, gt)
+            uses_physics_loss = getattr(_unwrap(model), "supports_physics_loss", False)
+            pred = model(inp, return_physics=True) if uses_physics_loss else model(inp)
+            loss, _ = criterion(pred, gt, inp) if uses_physics_loss else criterion(pred, gt)
         if not torch.isfinite(loss):
             raise FloatingPointError(
                 f"Non-finite validation loss at batch {batch_idx + 1}: {loss.item()}"
@@ -425,7 +427,7 @@ def main():
         get_euvp_training_set,
         get_uieb_training_set,
     )
-    from uwir.losses import CompositeLoss
+    from uwir.losses import CompositeLoss, PhysicsConsistentLoss
     from uwir.metrics import evaluate_loader
 
     # ------------------------------------------------------------------
@@ -543,11 +545,16 @@ def main():
     # ------------------------------------------------------------------
     # Loss
     # ------------------------------------------------------------------
-    criterion = CompositeLoss(
+    enhancement_criterion = CompositeLoss(
         lambda_l1=args.L1_weight,
         lambda_perc=args.perceptual_weight,
         lambda_ssim=args.SSIM_weight,
         device=device,
+    )
+    criterion = (
+        PhysicsConsistentLoss(enhancement_criterion, args.reconstruction_weight)
+        if getattr(_unwrap(model), "supports_physics_loss", False)
+        else enhancement_criterion
     )
 
     # ------------------------------------------------------------------
@@ -637,6 +644,7 @@ def main():
             "l1_weight": args.L1_weight,
             "perceptual_weight": args.perceptual_weight,
             "ssim_weight": args.SSIM_weight,
+            "reconstruction_weight": args.reconstruction_weight,
             "scheduler": (
                 "cosine_restart_cyclic"
                 if args.cos_restart_cyclic
