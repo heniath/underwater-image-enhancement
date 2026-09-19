@@ -49,16 +49,20 @@ echo ""
 echo "=== [5/6] Installing PyTorch with CUDA, causal-conv1d, and mamba-ssm ==="
 pip install --upgrade pip setuptools wheel
 
-# Install PyTorch with CUDA support
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+# Install PyTorch with CUDA support (cu124)
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
 
 # Install causal-conv1d and mamba-ssm prebuilt wheels for Linux
-pip install "causal-conv1d>=1.4.0"
-pip install "mamba-ssm>=2.2.0"
+python -m uwir.setup_mamba || {
+    echo ">> Fallback to standard pip wheels..."
+    pip install "causal-conv1d>=1.5.0" "mamba-ssm>=2.2.4" || true
+}
 
 echo ""
 echo "=== [6/6] Installing UWIR project dependencies ==="
-PROJECT_DIR="/mnt/d/eureka/underwater-image-enhancement"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
 if [ -d "$PROJECT_DIR" ]; then
     cd "$PROJECT_DIR"
     pip install -e .

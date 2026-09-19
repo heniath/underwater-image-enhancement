@@ -6,9 +6,13 @@
 #   1. Base + Edge Loss (weight = 1.0)
 #   2. Base + Edge Loss (weight = 2.0)
 #   3. Base + Edge Loss (weight = 10.0)
-#   4. Base + SSIM Loss (full 100 epochs, early_stop_patience=100)
+#   4. Base + TV Loss (weight = 1.0, user requested direct test)
+#   5. Base + TV Loss (weight = 0.001, literature paper standard e.g. UNTV 2022)
+#   6. Base + TV Loss (weight = 0.01, balanced regularizer)
+#   7. Base + SSIM Loss (full 100 epochs, early_stop_patience=100)
 #
-# Suitable for both Local Machine (RTX 3060) and Server environments.
+# Suitable for both Local Machine (RTX 3060 / RTX 5060) and Server environments.
+# To filter runs, pass e.g.: RUN_FILTER="tv" bash scripts/experiments/run_sgmanet_edge_and_ssim_runs.sh
 # ==============================================================================
 
 set -uo pipefail
@@ -23,17 +27,44 @@ BATCH_SIZE="${BATCH_SIZE:-16}"
 CROP_SIZE="${CROP_SIZE:-256}"
 LR="${LR:-1e-4}"
 AMP="${AMP:-True}"
-DATA_UIEB="${DATA_UIEB:-${PROJECT_DIR}/datasets/UIEB}"
-DATA_EUVP="${DATA_EUVP:-${PROJECT_DIR}/datasets/EUVP}"
+IN_MEMORY="${IN_MEMORY:-False}"
+VAL_INTERVAL="${VAL_INTERVAL:-1}"
+
+if [ -z "${DATA_UIEB:-}" ]; then
+    if [ -d "/root/Dataset/UIEB" ]; then
+        DATA_UIEB="/root/Dataset/UIEB"
+    elif [ -d "${PROJECT_DIR}/../Dataset/UIEB" ]; then
+        DATA_UIEB="${PROJECT_DIR}/../Dataset/UIEB"
+    else
+        DATA_UIEB="${PROJECT_DIR}/datasets/UIEB"
+    fi
+fi
+
+if [ -z "${DATA_EUVP:-}" ]; then
+    if [ -d "/root/Dataset/EUVP" ]; then
+        DATA_EUVP="/root/Dataset/EUVP"
+    elif [ -d "${PROJECT_DIR}/../Dataset/EUVP" ]; then
+        DATA_EUVP="${PROJECT_DIR}/../Dataset/EUVP"
+    else
+        DATA_EUVP="${PROJECT_DIR}/datasets/EUVP"
+    fi
+fi
 UIEB_LIMIT="${UIEB_LIMIT:-800}"
 NUM_GPUS="${NUM_GPUS:-1}"
+RUN_FILTER="${RUN_FILTER:-}"
 
 mkdir -p "${PROJECT_DIR}/logs"
 mkdir -p "${PROJECT_DIR}/checkpoints"
 mkdir -p "${PROJECT_DIR}/results"
 
+if [ -f "/opt/venv-uwir/bin/python3" ]; then
+    PYTHON_CMD="/opt/venv-uwir/bin/python3"
+else
+    PYTHON_CMD="${PYTHON_CMD:-python3}"
+fi
+
 clean_gpu_memory() {
-    python3 -c "
+    ${PYTHON_CMD} -c "
 import gc, torch
 gc.collect()
 if torch.cuda.is_available():
@@ -44,22 +75,36 @@ if torch.cuda.is_available():
     sleep 3
 }
 
-RUNS=(
+ALL_RUNS=(
     "sgmanet_5ch_uieb_edge_w1|--use_l1 1 --use_perc 1 --use_edge 1 --edge_weight 1.0"
     "sgmanet_5ch_uieb_edge_w2|--use_l1 1 --use_perc 1 --use_edge 1 --edge_weight 2.0"
     "sgmanet_5ch_uieb_edge_w10|--use_l1 1 --use_perc 1 --use_edge 1 --edge_weight 10.0"
+    "sgmanet_5ch_uieb_tv_w1|--use_l1 1 --use_perc 1 --use_tv 1 --tv_weight 1.0"
+    "sgmanet_5ch_uieb_tv_w0001|--use_l1 1 --use_perc 1 --use_tv 1 --tv_weight 0.001"
+    "sgmanet_5ch_uieb_tv_w001|--use_l1 1 --use_perc 1 --use_tv 1 --tv_weight 0.01"
     "sgmanet_5ch_uieb_ssim_full|--use_l1 1 --use_perc 1 --use_ssim 1 --SSIM_weight 0.1 --early_stop_patience 100"
 )
+
+RUNS=()
+for item in "${ALL_RUNS[@]}"; do
+    if [[ -z "${RUN_FILTER}" || "${item}" == *"${RUN_FILTER}"* ]]; then
+        RUNS+=("${item}")
+    fi
+done
 
 TOTAL_RUNS=${#RUNS[@]}
 RUN_IDX=0
 
 echo "================================================================="
-echo " Starting SGMA-Net Edge Loss & Full SSIM Experiments (${TOTAL_RUNS} runs)"
-echo " Model      : ${MODEL_VARIANT}"
-echo " Epochs     : ${N_EPOCHS}"
-echo " Batch Size : ${BATCH_SIZE}"
-echo " Start at   : $(date)"
+echo " Starting SGMA-Net Ablation Experiments (${TOTAL_RUNS} runs)"
+echo " Filter       : ${RUN_FILTER:-ALL}"
+echo " Model        : ${MODEL_VARIANT}"
+echo " Epochs       : ${N_EPOCHS}"
+echo " Batch Size   : ${BATCH_SIZE}"
+echo " In-Memory    : ${IN_MEMORY}"
+echo " Val Interval : ${VAL_INTERVAL}"
+echo " Dataset UIEB : ${DATA_UIEB}"
+echo " Start at     : $(date)"
 echo "================================================================="
 
 for run_item in "${RUNS[@]}"; do
@@ -77,7 +122,7 @@ for run_item in "${RUNS[@]}"; do
 
     START_T=$(date +%s)
 
-    python3 -m uwir.cli.train \
+    ${PYTHON_CMD} -m uwir.cli.train \
         --model "${MODEL_VARIANT}" \
         --dataset "uieb" \
         --data_train_uieb "${DATA_UIEB}" \
@@ -88,6 +133,8 @@ for run_item in "${RUNS[@]}"; do
         --cropSize "${CROP_SIZE}" \
         --lr "${LR}" \
         --amp "${AMP}" \
+        --in_memory "${IN_MEMORY}" \
+        --val_interval "${VAL_INTERVAL}" \
         --num_gpus "${NUM_GPUS}" \
         ${LOSS_FLAGS} 2>&1 | tee "${LOG_FILE}"
 
@@ -103,7 +150,7 @@ echo "================================================================="
 echo " Evaluating new checkpoints on UIEB-90 and EUVP benchmarks"
 echo "================================================================="
 
-python3 -m uwir.cli.evaluate \
+${PYTHON_CMD} -m uwir.cli.evaluate \
     --checkpoint_dir ./checkpoints \
     --eval_benchmark uieb+euvp \
     --data_train_uieb "${DATA_UIEB}" \

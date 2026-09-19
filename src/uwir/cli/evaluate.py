@@ -136,7 +136,7 @@ def _print_summary(all_results: dict):
     header = f"{'Run':<45} {'PSNR':>8} {'SSIM':>8} {'Inf(ms)':>8} {'Tr(min)':>8} {'Params(M)':>10} {'MACs(G)':>8}"
     sep = "-" * len(header)
     print(f"\n{'=' * len(header)}")
-    print("  RANKED SUMMARY  (sorted by PSNR ↓)")
+    print("  RANKED SUMMARY  (sorted by PSNR descending)")
     print(f"{'=' * len(header)}")
     print(header)
     print(sep)
@@ -266,7 +266,7 @@ def main():
                     dataset,
                     batch_size=batch_size,
                     shuffle=False,
-                    num_workers=getattr(args, "threads", 0),
+                    num_workers=0,
                     pin_memory=device.type == "cuda",
                     drop_last=False,
                     collate_fn=collate_fn,
@@ -291,7 +291,7 @@ def main():
             training_time_min = None
             log_path = os.path.join(args.checkpoint_dir, "..", "logs", f"{run_name}.log")
             if os.path.isfile(log_path):
-                with open(log_path) as f:
+                with open(log_path, encoding="utf-8", errors="replace") as f:
                     content = f.read()
                     match = re.search(r"Total training time:\s*([\d.]+)\s*min", content)
                     if match:
@@ -399,7 +399,7 @@ def main():
         json.dump(output, f, indent=2)
 
     print(f"\n{'=' * 65}")
-    print(f"  Results saved → {out_path}")
+    print(f"  Results saved -> {out_path}")
     print(f"{'=' * 65}")
 
 

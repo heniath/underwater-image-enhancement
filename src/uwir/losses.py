@@ -240,23 +240,31 @@ class TVLoss(nn.Module):
 
 class EdgeLoss(nn.Module):
     """
-    Edge preservation loss via Gaussian-Laplacian pyramid decomposition.
-    Identical to EdgeLoss in root `losses.py` (Burt & Adelson 1983).
-    Calculates L2 / MSE error between Laplacian edge feature maps:
+    Edge preservation loss via Gaussian-Laplacian pyramid decomposition (Burt & Adelson 1983).
+    Calculates distance between Laplacian edge feature maps:
         Lap(I) = I - Blur(Expand(Down(Blur(I))))
+
+    Supports:
+        - Arbitrary input channels (1, 3, etc.) with automatic kernel channel adaptation.
+        - Distance formulations: "mse" (L2, default), "l1" (MAE), or "charbonnier" (smoothed L1).
     """
 
-    def __init__(self, loss_weight: float = 1.0):
+    def __init__(self, loss_weight: float = 1.0, loss_type: str = "mse"):
         super().__init__()
         k = torch.tensor([0.05, 0.25, 0.40, 0.25, 0.05], dtype=torch.float32)
         kernel = torch.matmul(k.unsqueeze(1), k.unsqueeze(0)).unsqueeze(0).repeat(3, 1, 1, 1)
         self.register_buffer("kernel", kernel)
         self.weight = loss_weight
+        self.loss_type = loss_type.lower()
 
     def _conv_gauss(self, img: torch.Tensor) -> torch.Tensor:
-        n_channels, _, kw, kh = self.kernel.shape
+        n_channels = img.shape[1]
+        kernel = self.kernel
+        if kernel.shape[0] != n_channels:
+            kernel = kernel[:1].repeat(n_channels, 1, 1, 1)
+        kw, kh = kernel.shape[2], kernel.shape[3]
         img = F.pad(img, (kw // 2, kh // 2, kw // 2, kh // 2), mode="replicate")
-        return F.conv2d(img, self.kernel.to(img.device, img.dtype), groups=n_channels)
+        return F.conv2d(img, kernel.to(img.device, img.dtype), groups=n_channels)
 
     def _laplacian(self, current: torch.Tensor) -> torch.Tensor:
         filtered = self._conv_gauss(current)
@@ -270,7 +278,13 @@ class EdgeLoss(nn.Module):
 
     def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         diff = self._laplacian(pred) - self._laplacian(target)
-        return torch.mean(diff ** 2) * self.weight
+        if self.loss_type == "l1":
+            loss = torch.mean(torch.abs(diff))
+        elif self.loss_type == "charbonnier":
+            loss = torch.mean(torch.sqrt(diff ** 2 + 1e-6))
+        else:  # "mse"
+            loss = torch.mean(diff ** 2)
+        return loss * self.weight
 
 
 # ---------------------------------------------------------------------------
