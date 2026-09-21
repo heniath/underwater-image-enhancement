@@ -288,9 +288,42 @@ class EdgeLoss(nn.Module):
 
 
 # ---------------------------------------------------------------------------
+# Gradient Difference Loss (GDL, Mathieu et al., ICLR 2016)
+# ---------------------------------------------------------------------------
+
+
+class GradientDifferenceLoss(nn.Module):
+    """
+    Gradient Difference Loss (GDL / GD) for sharp edge and micro-gradient preservation.
+    (Mathieu et al., "Deep multi-scale video prediction beyond mean square error", ICLR 2016).
+
+    Penalizes the absolute difference between predicted and ground-truth spatial gradients
+    along both vertical (height) and horizontal (width) axes:
+        diff_h = |(pred[:, :, 1:, :] - pred[:, :, :-1, :]) - (target[:, :, 1:, :] - target[:, :, :-1, :])|
+        diff_w = |(pred[:, :, :, 1:] - pred[:, :, :, :-1]) - (target[:, :, :, 1:] - target[:, :, :, :-1])|
+        L_gd = mean(diff_h) + mean(diff_w)
+    """
+
+    def __init__(self, loss_weight: float = 1.0, alpha: int = 1):
+        super().__init__()
+        self.weight = loss_weight
+        self.alpha = alpha
+
+    def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        diff_h = torch.abs((pred[:, :, 1:, :] - pred[:, :, :-1, :]) - (target[:, :, 1:, :] - target[:, :, :-1, :]))
+        diff_w = torch.abs((pred[:, :, :, 1:] - pred[:, :, :, :-1]) - (target[:, :, :, 1:] - target[:, :, :, :-1]))
+        if self.alpha == 2:
+            loss = torch.mean(diff_h ** 2) + torch.mean(diff_w ** 2)
+        else:
+            loss = torch.mean(diff_h) + torch.mean(diff_w)
+        return loss * self.weight
+
+
+# ---------------------------------------------------------------------------
 # Local Variance-Weighted (LVW) / Outlier-Aware Loss (MobileIE, Yan et al., 2025)
 # Official repository: https://github.com/AVC2-UESTC/MobileIE/blob/main/loss.py
 # ---------------------------------------------------------------------------
+
 
 
 class LocalVarianceLoss(nn.Module):
@@ -583,6 +616,7 @@ class CompositeLoss(nn.Module):
         lambda_wavelet: float = 0.0,
         lambda_tv: float = 0.001,
         lambda_edge: float = 0.1,
+        lambda_gd: float = 1.0,
         lambda_lvw: float = 0.1,
         lambda_uiqm: float = 0.05,
         lambda_hvi: float = 0.5,
@@ -597,6 +631,7 @@ class CompositeLoss(nn.Module):
         use_wavelet: int = 0,
         use_tv: int = 0,
         use_edge: int = 0,
+        use_gd: int = 0,
         use_lvw: int = 0,
         use_uiqm: int = 0,
         use_hvi: int = 0,
@@ -613,6 +648,8 @@ class CompositeLoss(nn.Module):
         self.eff_wavelet = float(lambda_wavelet) if int(use_wavelet) else 0.0
         self.eff_tv = float(lambda_tv) if int(use_tv) else 0.0
         self.eff_edge = float(lambda_edge) if int(use_edge) else 0.0
+        self.eff_gd = float(lambda_gd) if int(use_gd) else 0.0
+
         self.eff_lvw = float(lambda_lvw) if int(use_lvw) else 0.0
         self.eff_uiqm = float(lambda_uiqm) if int(use_uiqm) else 0.0
         self.eff_hvi = float(lambda_hvi) if int(use_hvi) else 0.0
@@ -626,6 +663,7 @@ class CompositeLoss(nn.Module):
         self.wavelet = WaveletLoss() if self.eff_wavelet else None
         self.tv = TVLoss(loss_weight=1.0) if self.eff_tv else None
         self.edge = EdgeLoss(loss_weight=1.0) if self.eff_edge else None
+        self.gd = GradientDifferenceLoss(loss_weight=1.0) if self.eff_gd else None
         self.lvw = LocalVarianceLoss(mode=lvw_mode, kernel_size=7, loss_weight=1.0) if self.eff_lvw else None
         self.uiqm = UIQMLoss(loss_weight=1.0) if self.eff_uiqm else None
         self.hvi = HVILoss(density_k=density_k, loss_weight=1.0) if self.eff_hvi else None
@@ -674,12 +712,20 @@ class CompositeLoss(nn.Module):
         else:
             parts["edge"] = 0.0
 
+        if self.gd is not None and self.eff_gd:
+            l_gd = self.gd(pred, target)
+            total = total + self.eff_gd * l_gd
+            parts["gd"] = l_gd.item()
+        else:
+            parts["gd"] = 0.0
+
         if self.lvw is not None and self.eff_lvw:
             l_lvw = self.lvw(pred, target)
             total = total + self.eff_lvw * l_lvw
             parts["lvw"] = l_lvw.item()
         else:
             parts["lvw"] = 0.0
+
 
         if self.uiqm is not None and self.eff_uiqm:
             l_uiqm = self.uiqm(pred, target)
@@ -725,6 +771,7 @@ __all__ = [
     "ColorAngleLoss",
     "CompositeLoss",
     "EdgeLoss",
+    "GradientDifferenceLoss",
     "HVILoss",
     "LaplacianPyramidLoss",
     "LocalVarianceLoss",

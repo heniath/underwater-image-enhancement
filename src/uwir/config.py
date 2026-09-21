@@ -265,6 +265,19 @@ def option():
         default=3,
         help="Number of pyramid decomposition levels for Laplacian Loss (default: 3)",
     )
+    parser.add_argument(
+        "--gd_weight",
+        type=float,
+        default=1.0,
+        help="λ_gd — Gradient Difference Loss weight (Mathieu et al. ICLR 2016, default: 1.0)",
+    )
+    parser.add_argument(
+        "--gd_alpha",
+        type=int,
+        default=1,
+        choices=[1, 2],
+        help="Norm for Gradient Difference Loss (1=L1 norm, 2=L2 squared)",
+    )
 
     # Simple 0 / 1 toggles for Kaggle ablations
     parser.add_argument(
@@ -301,6 +314,13 @@ def option():
         default=0,
         choices=[0, 1],
         help="Toggle Edge loss (1=enable, 0=disable)",
+    )
+    parser.add_argument(
+        "--use_gd",
+        type=int,
+        default=0,
+        choices=[0, 1],
+        help="Toggle Gradient Difference Loss (1=enable, 0=disable)",
     )
     parser.add_argument(
         "--use_lvw",

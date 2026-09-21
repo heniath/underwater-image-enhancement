@@ -615,6 +615,7 @@ def main():
         lambda_ssim=args.SSIM_weight,
         lambda_tv=args.tv_weight,
         lambda_edge=args.edge_weight,
+        lambda_gd=getattr(args, "gd_weight", 1.0),
         lambda_lvw=args.lvw_weight,
         lambda_uiqm=args.uiqm_weight,
         lambda_hvi=args.hvi_weight,
@@ -627,6 +628,7 @@ def main():
         use_ssim=args.use_ssim,
         use_tv=args.use_tv,
         use_edge=args.use_edge,
+        use_gd=getattr(args, "use_gd", 0),
         use_lvw=args.use_lvw,
         use_uiqm=args.use_uiqm,
         use_hvi=args.use_hvi,
@@ -639,6 +641,7 @@ def main():
     if criterion.eff_ssim: active_losses.append(f"SSIM({criterion.eff_ssim})")
     if criterion.eff_tv: active_losses.append(f"TV({criterion.eff_tv})")
     if criterion.eff_edge: active_losses.append(f"Edge({criterion.eff_edge})")
+    if criterion.eff_gd: active_losses.append(f"GD({criterion.eff_gd})")
     if criterion.eff_lvw: active_losses.append(f"LVW({criterion.eff_lvw})")
     if criterion.eff_uiqm: active_losses.append(f"UIQM({criterion.eff_uiqm})")
     if criterion.eff_hvi: active_losses.append(f"HVI({criterion.eff_hvi})")
