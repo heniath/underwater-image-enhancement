@@ -97,8 +97,10 @@ class RMSNorm(nn.Module):
         self.weight = nn.Parameter(torch.ones(dim))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        norm = torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps)
-        return x * norm * self.weight
+        input_dtype = x.dtype
+        x_f32 = x.float()
+        norm = torch.rsqrt(x_f32.pow(2).mean(-1, keepdim=True) + self.eps)
+        return (x_f32 * norm).to(input_dtype) * self.weight
 
 
 class MambaSelectiveScan(nn.Module):
@@ -487,7 +489,7 @@ class MDSA(nn.Module):
         # Channel-wise statistics: Mean, Max, Std across channels
         mean_map = f_md.mean(dim=1, keepdim=True)
         max_map = f_md.amax(dim=1, keepdim=True)
-        std_map = torch.sqrt(f_md.var(dim=1, keepdim=True, unbiased=False) + 1e-6)
+        std_map = torch.sqrt(f_md.float().var(dim=1, keepdim=True, unbiased=False) + 1e-6).to(f_md.dtype)
 
         stats = torch.cat([mean_map, max_map, std_map], dim=1)  # (B, 3, H, W)
         a_sa = self.sa_dsconv(stats)  # (B, 1, H, W)

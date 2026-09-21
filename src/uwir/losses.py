@@ -211,16 +211,175 @@ class WaveletLoss(nn.Module):
 
 
 # ---------------------------------------------------------------------------
+# Local Variance-Weighted Loss (MobileIE - ICCV 2025)
+# ---------------------------------------------------------------------------
+
+
+class LocalVarianceWeightedLoss(nn.Module):
+    """
+    Local Variance-Weighted (LVW) / Outlier-Aware Loss from MobileIE (ICCV 2025).
+    Dynamically weights pixel residuals by local spatial variation
+    to prevent lightweight networks from being misled by extreme outliers.
+
+    Args:
+        eps (float): Epsilon for numerical stability. Default: 1e-6.
+    """
+
+    def __init__(self, eps: float = 1e-6):
+        super().__init__()
+        self.eps = eps
+
+    def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        delta = pred - target
+        var = delta.std(dim=(-2, -1), keepdim=True) / (2.0**0.5)
+        avg = delta.mean(dim=(-2, -1), keepdim=True)
+        weight = torch.tanh((delta - avg).abs() / (var + self.eps)).detach()
+        return (delta.abs() * weight).mean()
+
+
+MobileIELoss = LocalVarianceWeightedLoss
+
+
+# ---------------------------------------------------------------------------
+# Edge / Gradient Loss (Sobel-based)
+# ---------------------------------------------------------------------------
+
+
+class EdgeLoss(nn.Module):
+    """
+    Sobel-based Edge/Gradient Loss to preserve high-frequency structural contours.
+    Penalizes discrepancies between spatial gradients of pred and target.
+    """
+
+    def __init__(self):
+        super().__init__()
+        kx = torch.tensor(
+            [[-1.0, 0.0, 1.0], [-2.0, 0.0, 2.0], [-1.0, 0.0, 1.0]], dtype=torch.float32
+        ).view(1, 1, 3, 3)
+        ky = torch.tensor(
+            [[-1.0, -2.0, -1.0], [0.0, 0.0, 0.0], [1.0, 2.0, 1.0]], dtype=torch.float32
+        ).view(1, 1, 3, 3)
+        self.register_buffer("kx", kx)
+        self.register_buffer("ky", ky)
+
+    def _gradient(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        b, c, h, w = x.shape
+        x_flat = x.reshape(b * c, 1, h, w)
+        kx = self.kx.to(device=x.device, dtype=x.dtype)
+        ky = self.ky.to(device=x.device, dtype=x.dtype)
+        gx = F.conv2d(x_flat, kx, padding=1)
+        gy = F.conv2d(x_flat, ky, padding=1)
+        return gx.view(b, c, h, w), gy.view(b, c, h, w)
+
+    def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        pred_gx, pred_gy = self._gradient(pred)
+        tgt_gx, tgt_gy = self._gradient(target)
+        return F.l1_loss(pred_gx, tgt_gx) + F.l1_loss(pred_gy, tgt_gy)
+
+
+# ---------------------------------------------------------------------------
+# Total Variation (TV) Loss
+# ---------------------------------------------------------------------------
+
+
+class TotalVariationLoss(nn.Module):
+    """
+    Total Variation (TV) Loss for spatial smoothness, noise reduction, and artifact suppression.
+    """
+
+    def forward(self, pred: torch.Tensor, target: torch.Tensor | None = None) -> torch.Tensor:
+        diff_h = (pred[:, :, 1:, :] - pred[:, :, :-1, :]).abs().mean()
+        diff_w = (pred[:, :, :, 1:] - pred[:, :, :, :-1]).abs().mean()
+        return diff_h + diff_w
+
+
+# ---------------------------------------------------------------------------
+# Differentiable UIQM Loss
+# ---------------------------------------------------------------------------
+
+
+class UIQMLoss(nn.Module):
+    """
+    Differentiable UIQM (Underwater Image Quality Measure) loss.
+    Computes differentiable approximations for:
+      - UICM   (colorfulness)
+      - UISM   (sharpness via Sobel magnitude)
+      - UIConM (contrast via std/mean)
+
+    Formulation minimizes negative UIQM score:
+        loss = -mean(c1 * UICM + c2 * UISM + c3 * UIConM)
+
+    Args:
+        c1 (float): Weight for UICM.   Default: 0.0282.
+        c2 (float): Weight for UISM.   Default: 0.2953.
+        c3 (float): Weight for UIConM. Default: 3.5753.
+        eps (float): Epsilon for stability. Default: 1e-6.
+    """
+
+    def __init__(
+        self,
+        c1: float = 0.0282,
+        c2: float = 0.2953,
+        c3: float = 3.5753,
+        eps: float = 1e-6,
+    ):
+        super().__init__()
+        self.c1 = c1
+        self.c2 = c2
+        self.c3 = c3
+        self.eps = eps
+        kx = torch.tensor(
+            [[-1.0, 0.0, 1.0], [-2.0, 0.0, 2.0], [-1.0, 0.0, 1.0]], dtype=torch.float32
+        ).view(1, 1, 3, 3)
+        ky = torch.tensor(
+            [[-1.0, -2.0, -1.0], [0.0, 0.0, 0.0], [1.0, 2.0, 1.0]], dtype=torch.float32
+        ).view(1, 1, 3, 3)
+        self.register_buffer("kx", kx)
+        self.register_buffer("ky", ky)
+
+    def forward(self, pred: torch.Tensor, target: torch.Tensor | None = None) -> torch.Tensor:
+        pred_clamped = pred.clamp(0.0, 1.0)
+        r = pred_clamped[:, 0:1, :, :]
+        g = pred_clamped[:, 1:2, :, :]
+        b = pred_clamped[:, 2:3, :, :]
+
+        # 1. UICM (Colorfulness)
+        rg = r - g
+        yb = 0.5 * (r + g) - b
+        mean_rg = rg.mean(dim=(-2, -1))
+        mean_yb = yb.mean(dim=(-2, -1))
+        std_rg = rg.std(dim=(-2, -1))
+        std_yb = yb.std(dim=(-2, -1))
+        uicm = -0.0268 * torch.sqrt(mean_rg**2 + mean_yb**2 + self.eps) + 0.1586 * torch.sqrt(
+            std_rg**2 + std_yb**2 + self.eps
+        )
+
+        # 2. UISM (Sharpness on luminance)
+        gray = 0.2989 * r + 0.5870 * g + 0.1140 * b
+        kx = self.kx.to(device=gray.device, dtype=gray.dtype)
+        ky = self.ky.to(device=gray.device, dtype=gray.dtype)
+        sx = F.conv2d(gray, kx, padding=1)
+        sy = F.conv2d(gray, ky, padding=1)
+        uism = torch.sqrt(sx**2 + sy**2 + self.eps).mean(dim=(-3, -2, -1))
+
+        # 3. UIConM (Contrast)
+        mu_g = gray.mean(dim=(-3, -2, -1))
+        sigma_g = gray.std(dim=(-3, -2, -1))
+        uiconm = sigma_g / (mu_g + self.eps)
+
+        uiqm = self.c1 * uicm + self.c2 * uism + self.c3 * uiconm
+        return -uiqm.mean()
+
+
+# ---------------------------------------------------------------------------
 # Composite Loss
 # ---------------------------------------------------------------------------
 
 
 class CompositeLoss(nn.Module):
     """
-    Weighted combination of pixel fidelity (L1 or Charbonnier), VGG perceptual,
-    SSIM, Color Angle, and Wavelet frequency losses:
-
-        loss = λ_l1·L1_or_Charb + λ_perc·Perceptual + λ_ssim·SSIM + λ_color·Color + λ_wav·Wavelet
+    Weighted combination of pixel fidelity (L1, Charbonnier, or LVW), VGG perceptual,
+    SSIM, Color Angle, Wavelet frequency, Edge, Total Variation, and UIQM losses:
 
     Args:
         lambda_l1       (float): Weight for L1 or Charbonnier loss. Default: 1.0.
@@ -228,6 +387,10 @@ class CompositeLoss(nn.Module):
         lambda_ssim     (float): Weight for SSIM loss.             Default: 0.5.
         lambda_color    (float): Weight for Color Angle loss.      Default: 0.0.
         lambda_wavelet  (float): Weight for Wavelet domain loss.   Default: 0.0.
+        lambda_lvw      (float): Weight for Local Variance-Weighted (MobileIE) loss. Default: 0.0.
+        lambda_edge     (float): Weight for Sobel Edge loss.       Default: 0.0.
+        lambda_tv       (float): Weight for Total Variation loss.  Default: 0.0.
+        lambda_uiqm     (float): Weight for Differentiable UIQM loss. Default: 0.0.
         use_charbonnier  (bool): If True, use CharbonnierLoss instead of L1. Default: False.
         device (str | torch.device): Device for VGG backbone.
     """
@@ -239,6 +402,10 @@ class CompositeLoss(nn.Module):
         lambda_ssim: float = 0.5,
         lambda_color: float = 0.0,
         lambda_wavelet: float = 0.0,
+        lambda_lvw: float = 0.0,
+        lambda_edge: float = 0.0,
+        lambda_tv: float = 0.0,
+        lambda_uiqm: float = 0.0,
         use_charbonnier: bool = False,
         device: str | torch.device = "cpu",
     ):
@@ -248,6 +415,10 @@ class CompositeLoss(nn.Module):
         self.lambda_ssim = lambda_ssim
         self.lambda_color = lambda_color
         self.lambda_wavelet = lambda_wavelet
+        self.lambda_lvw = lambda_lvw
+        self.lambda_edge = lambda_edge
+        self.lambda_tv = lambda_tv
+        self.lambda_uiqm = lambda_uiqm
         self.use_charbonnier = use_charbonnier
 
         self.l1 = CharbonnierLoss() if use_charbonnier else nn.L1Loss()
@@ -255,6 +426,10 @@ class CompositeLoss(nn.Module):
         self.ssim = SSIMLoss() if lambda_ssim else None
         self.color = ColorAngleLoss() if lambda_color else None
         self.wavelet = WaveletLoss() if lambda_wavelet else None
+        self.lvw = LocalVarianceWeightedLoss() if lambda_lvw else None
+        self.edge = EdgeLoss() if lambda_edge else None
+        self.tv = TotalVariationLoss() if lambda_tv else None
+        self.uiqm = UIQMLoss() if lambda_uiqm else None
 
     def forward(
         self,
@@ -268,13 +443,17 @@ class CompositeLoss(nn.Module):
 
         Returns:
             total (Tensor): Scalar combined loss.
-            parts (dict):   Per-component losses as Python floats
-                            with keys ``"l1"``, ``"perceptual"``,
-                            ``"ssim_loss"``, ``"color"``, ``"wavelet"``, ``"total"``.
+            parts (dict):   Per-component losses as Python floats.
         """
-        l_l1 = self.l1(pred, target)
-        total = self.lambda_l1 * l_l1
-        parts = {"l1": l_l1.item()}
+        total = pred.new_zeros(())
+        parts: dict[str, float] = {}
+
+        if self.lambda_l1:
+            l_l1 = self.l1(pred, target)
+            total = total + self.lambda_l1 * l_l1
+            parts["l1"] = l_l1.item()
+        else:
+            parts["l1"] = 0.0
 
         if self.perc is not None and self.lambda_perc:
             l_perc = self.perc(pred, target)
@@ -304,6 +483,34 @@ class CompositeLoss(nn.Module):
         else:
             parts["wavelet"] = 0.0
 
+        if self.lvw is not None and self.lambda_lvw:
+            l_lvw = self.lvw(pred, target)
+            total = total + self.lambda_lvw * l_lvw
+            parts["lvw"] = l_lvw.item()
+        else:
+            parts["lvw"] = 0.0
+
+        if self.edge is not None and self.lambda_edge:
+            l_edge = self.edge(pred, target)
+            total = total + self.lambda_edge * l_edge
+            parts["edge"] = l_edge.item()
+        else:
+            parts["edge"] = 0.0
+
+        if self.tv is not None and self.lambda_tv:
+            l_tv = self.tv(pred, target)
+            total = total + self.lambda_tv * l_tv
+            parts["tv"] = l_tv.item()
+        else:
+            parts["tv"] = 0.0
+
+        if self.uiqm is not None and self.lambda_uiqm:
+            l_uiqm = self.uiqm(pred, target)
+            total = total + self.lambda_uiqm * l_uiqm
+            parts["uiqm"] = l_uiqm.item()
+        else:
+            parts["uiqm"] = 0.0
+
         parts["total"] = total.item()
         return total, parts
 
@@ -312,7 +519,12 @@ __all__ = [
     "CharbonnierLoss",
     "ColorAngleLoss",
     "CompositeLoss",
+    "EdgeLoss",
+    "LocalVarianceWeightedLoss",
+    "MobileIELoss",
     "SSIMLoss",
+    "TotalVariationLoss",
+    "UIQMLoss",
     "VGGPerceptualLoss",
     "WaveletLoss",
 ]

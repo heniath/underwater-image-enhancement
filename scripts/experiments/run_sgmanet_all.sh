@@ -34,6 +34,14 @@ DATA_EUVP="${DATA_EUVP:-${PROJECT_DIR}/datasets/EUVP}"
 DATA_UIEB="${DATA_UIEB:-${PROJECT_DIR}/datasets/UIEB}"
 COOLDOWN_SECS="${COOLDOWN_SECS:-10}"
 
+# Loss configuration (optimized for higher PSNR: Charbonnier + SSIM + Color + Wavelet)
+USE_CHARBONNIER="${USE_CHARBONNIER:-True}"
+L1_WEIGHT="${L1_WEIGHT:-1.0}"
+SSIM_WEIGHT="${SSIM_WEIGHT:-0.3}"
+COLOR_WEIGHT="${COLOR_WEIGHT:-0.2}"
+WAVELET_WEIGHT="${WAVELET_WEIGHT:-0.1}"
+PERCEPTUAL_WEIGHT="${PERCEPTUAL_WEIGHT:-0.05}"
+
 # Datasets and model variants
 DATASETS=("euvp" "uieb")
 VARIANTS=("sgmanet_3ch" "sgmanet_4ch_t" "sgmanet_4ch_b" "sgmanet_5ch")
@@ -133,6 +141,17 @@ for ds in "${DATASETS[@]}"; do
         elif [ "${ds}" == "uieb" ]; then
             RUN_CMD+=(--data_train_uieb "${DATA_UIEB}")
         fi
+
+        if [ "${USE_CHARBONNIER}" == "True" ]; then
+            RUN_CMD+=(--use_charbonnier)
+        fi
+        RUN_CMD+=(
+            --L1_weight "${L1_WEIGHT}"
+            --SSIM_weight "${SSIM_WEIGHT}"
+            --color_weight "${COLOR_WEIGHT}"
+            --wavelet_weight "${WAVELET_WEIGHT}"
+            --perceptual_weight "${PERCEPTUAL_WEIGHT}"
+        )
 
         # Execute training and mirror output to log file
         "${RUN_CMD[@]}" 2>&1 | tee "${LOG_FILE}"

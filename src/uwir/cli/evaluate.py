@@ -5,6 +5,7 @@
 import json
 import os
 import re
+import sys
 import traceback
 from datetime import datetime
 from pathlib import Path
@@ -53,6 +54,19 @@ def collect_test_pairs(data_root):
 
 def collect_uieb_test_pairs(data_root, seed: int = 42, count: int = 90):
     """Return a fixed, deterministic UIEB-90 cross-dataset benchmark."""
+    # Check if dedicated split test folder exists
+    split_inp = Path(data_root) / "test" / "input"
+    split_ref = Path(data_root) / "test" / "reference"
+    if split_inp.is_dir() and split_ref.is_dir():
+        targets = {path.stem: path for path in split_ref.iterdir() if path.suffix in IMG_EXTS}
+        pairs = [
+            (str(path), str(targets[path.stem]))
+            for path in sorted(split_inp.iterdir())
+            if path.suffix in IMG_EXTS and path.stem in targets
+        ]
+        if pairs:
+            return pairs
+
     input_dir = Path(data_root) / "raw-890"
     target_dir = Path(data_root) / "reference-890"
     targets = {path.stem: path for path in target_dir.iterdir() if path.suffix in IMG_EXTS}
@@ -136,7 +150,7 @@ def _print_summary(all_results: dict):
     header = f"{'Run':<45} {'PSNR':>8} {'SSIM':>8} {'Inf(ms)':>8} {'Tr(min)':>8} {'Params(M)':>10} {'MACs(G)':>8}"
     sep = "-" * len(header)
     print(f"\n{'=' * len(header)}")
-    print("  RANKED SUMMARY  (sorted by PSNR ↓)")
+    print("  RANKED SUMMARY  (sorted by PSNR desc)")
     print(f"{'=' * len(header)}")
     print(header)
     print(sep)
@@ -255,14 +269,15 @@ def main():
                 return _collate_val(batch, mode, physics_extractor)
 
             def make_loader(dataset, batch_size):
+                num_workers = 0 if sys.platform == "win32" else getattr(args, "threads", 0)
                 return data.DataLoader(
-                dataset,
-                batch_size=batch_size,
-                shuffle=False,
-                num_workers=getattr(args, "threads", 0),
-                pin_memory=device.type == "cuda",
-                drop_last=False,
-                collate_fn=collate_fn,
+                    dataset,
+                    batch_size=batch_size,
+                    shuffle=False,
+                    num_workers=num_workers,
+                    pin_memory=device.type == "cuda",
+                    drop_last=False,
+                    collate_fn=collate_fn,
                 )
 
             legacy_loader = make_loader(legacy_ds, args.batchSize)
@@ -383,7 +398,7 @@ def main():
         json.dump(output, f, indent=2)
 
     print(f"\n{'=' * 65}")
-    print(f"  Results saved → {out_path}")
+    print(f"  Results saved -> {out_path}")
     print(f"{'=' * 65}")
 
 

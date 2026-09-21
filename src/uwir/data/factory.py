@@ -29,6 +29,7 @@ def get_uieb_training_set(
     data_dir: str,
     img_size: int = 256,
     in_memory: bool = False,
+    split: str | None = "train",
 ) -> UIEBDataset:
     return UIEBDataset(
         data_dir,
@@ -36,4 +37,5 @@ def get_uieb_training_set(
         augment=True,
         in_memory=in_memory,
         img_size=img_size,
+        split=split,
     )

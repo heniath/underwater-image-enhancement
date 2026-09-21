@@ -41,14 +41,39 @@ class UIEBDataset(data.Dataset):
     INPUT_DIR = "raw-890"
     GT_DIR = "reference-890"
 
-    def __init__(self, data_dir, transform=None, augment=False, in_memory=False, img_size=None):
+    def __init__(
+        self,
+        data_dir,
+        transform=None,
+        augment=False,
+        in_memory=False,
+        img_size=None,
+        split=None,
+    ):
         super().__init__()
-        self.input_dir = join(data_dir, self.INPUT_DIR)
-        self.gt_dir = join(data_dir, self.GT_DIR)
+        if split in ("train", "test"):
+            cand_inp = join(data_dir, split, "input")
+            cand_gt = join(data_dir, split, "reference")
+            if os.path.isdir(cand_inp) and os.path.isdir(cand_gt):
+                self.input_dir = cand_inp
+                self.gt_dir = cand_gt
+            else:
+                self.input_dir = join(data_dir, self.INPUT_DIR)
+                self.gt_dir = join(data_dir, self.GT_DIR)
+        elif os.path.isdir(join(data_dir, "train", "input")) and os.path.isdir(
+            join(data_dir, "train", "reference")
+        ):
+            self.input_dir = join(data_dir, "train", "input")
+            self.gt_dir = join(data_dir, "train", "reference")
+        else:
+            self.input_dir = join(data_dir, self.INPUT_DIR)
+            self.gt_dir = join(data_dir, self.GT_DIR)
+
         self.transform = transform
         self.augment = augment
         self.in_memory = in_memory
         self.img_size = img_size
+        self.split = split
 
         # Stem-name matching (robust against ordering differences)
         gt_dict = {

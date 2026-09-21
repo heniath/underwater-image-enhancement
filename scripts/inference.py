@@ -175,7 +175,7 @@ def main():
                     model,
                     inp_tensor,
                     tile_size=args.tile_size,
-                    tile_overlap=args.tile_overlap,
+                    overlap=args.tile_overlap,
                 )
             else:
                 out = model(inp_tensor)

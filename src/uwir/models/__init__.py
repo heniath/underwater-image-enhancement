@@ -2,6 +2,7 @@
 
 from .fanet import FANet, ResidualFeatureAttentionBlock, build_fanet
 from .fanetplus import DualDilationConv, EnhancedRFAB, FANetPlus, build_fanetplus
+from .fgdpa import FGDPANet, FGDPASlimNet, build_fgdpa, build_fgdpaslim
 from .liteenhancenet import LiteEnhanceNet, build_liteenhancenet
 from .lsnet import LSNet, SelectiveAttentionBlock, build_lsnet
 from .mobileie import FeatureSelfTransform, MobileIENet, build_mobileie
@@ -23,6 +24,8 @@ __all__ = [
     "EnhancedRFAB",
     "FANet",
     "FANetPlus",
+    "FGDPANet",
+    "FGDPASlimNet",
     "FeatureSelfTransform",
     "LSNet",
     "LiteEnhanceNet",
@@ -40,6 +43,8 @@ __all__ = [
     "UWLYTV2",
     "build_fanet",
     "build_fanetplus",
+    "build_fgdpa",
+    "build_fgdpaslim",
     "build_liteenhancenet",
     "build_lsnet",
     "build_mobileie",

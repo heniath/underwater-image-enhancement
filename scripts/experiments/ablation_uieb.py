@@ -82,6 +82,51 @@ from uwir.cli.train import (
 
 
 # ---------------------------------------------------------------------------
+# System & GPU Cleanup Helper
+# ---------------------------------------------------------------------------
+
+def cleanup_system(device: torch.device | None = None, verbose: bool = True):
+    """
+    Thorough system and GPU memory cleanup between model runs:
+    1. Synchronize pending CUDA operations.
+    2. Collect Python garbage to release unreferenced DataLoaders/tensors.
+    3. Empty PyTorch CUDA caching allocator and IPC cache.
+    4. Reset peak CUDA memory statistics.
+    5. Log memory freed, current allocated VRAM, and system RAM percentage.
+    """
+    import gc
+    if device is not None and device.type == "cuda" and torch.cuda.is_available():
+        torch.cuda.synchronize(device)
+    elif torch.cuda.is_available():
+        torch.cuda.synchronize()
+
+    gc.collect()
+
+    msg_parts = []
+    if torch.cuda.is_available():
+        before_res = torch.cuda.memory_reserved() / (1024 ** 2)
+        torch.cuda.empty_cache()
+        torch.cuda.ipc_collect()
+        torch.cuda.reset_peak_memory_stats()
+        after_res = torch.cuda.memory_reserved() / (1024 ** 2)
+        after_alloc = torch.cuda.memory_allocated() / (1024 ** 2)
+        freed = max(0.0, before_res - after_res)
+        msg_parts.append(
+            f"VRAM: {after_alloc:.1f} MB allocated, {after_res:.1f} MB reserved (freed {freed:.1f} MB)"
+        )
+
+    try:
+        import psutil
+        ram = psutil.virtual_memory()
+        msg_parts.append(f"RAM: {ram.percent}% used ({ram.available / (1024**3):.1f} GB free)")
+    except Exception:
+        pass
+
+    if verbose and msg_parts:
+        print(f"  [CLEANUP] " + " | ".join(msg_parts))
+
+
+# ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
@@ -90,9 +135,13 @@ ABLATION_VARIANTS = [
     "uwlyt_3ch", "uwlyt_4ch_t", "uwlyt_4ch_b", "uwlyt_5ch",
     "uwlytv2_3ch", "uwlytv2_4ch_t", "uwlytv2_6ch_b", "uwlytv2_7ch",
     "nafnettiny_3ch", "nafnettiny_4ch_t", "nafnettiny_4ch_b", "nafnettiny_5ch",
-    "nafnetmicro_3ch",
-    "fanet_3ch", "fanet_5ch", "fanetplus_3ch", "fanetplus_5ch",
-    "mobileie_3ch", "liteenhancenet_3ch", "lsnet_3ch",
+    "nafnetmicro_3ch", "nafnetmicro_4ch_t", "nafnetmicro_4ch_b", "nafnetmicro_5ch",
+    "fanet_3ch", "fanet_4ch_t", "fanet_4ch_b", "fanet_5ch",
+    "fanetplus_3ch", "fanetplus_4ch_t", "fanetplus_4ch_b", "fanetplus_5ch",
+    "mobileie_3ch", "mobileie_4ch_t", "mobileie_4ch_b", "mobileie_5ch",
+    "liteenhancenet_3ch", "liteenhancenet_4ch_t", "liteenhancenet_4ch_b", "liteenhancenet_5ch",
+    "lsnet_3ch", "lsnet_4ch_t", "lsnet_4ch_b", "lsnet_5ch",
+    "sgmanet_3ch", "sgmanet_4ch_t", "sgmanet_4ch_b", "sgmanet_5ch",
 ]
 LEGACY_BASELINE = {"model": "unet_3ch", "psnr": 21.017, "ssim": 0.8871}
 METRIC_KEYS       = ("psnr", "ssim", "ciede2000", "uciqe", "uiqm",
@@ -183,6 +232,12 @@ def _make_parser() -> argparse.ArgumentParser:
     p.add_argument("--L1_weight",            type=float, default=1.0)
     p.add_argument("--perceptual_weight",    type=float, default=1.0)
     p.add_argument("--SSIM_weight",          type=float, default=0.0)
+    p.add_argument("--color_weight",         type=float, default=0.0,
+                   help="Cosine color angle loss weight.")
+    p.add_argument("--wavelet_weight",       type=float, default=0.0,
+                   help="Wavelet high-frequency detail loss weight.")
+    p.add_argument("--use_charbonnier",      action="store_true",
+                   help="Use smooth Charbonnier loss instead of standard L1.")
 
     # Multi-run
     p.add_argument(
@@ -272,6 +327,9 @@ def train_one_run(
         lambda_l1=args.L1_weight,
         lambda_perc=args.perceptual_weight,
         lambda_ssim=args.SSIM_weight,
+        lambda_color=getattr(args, "color_weight", 0.0),
+        lambda_wavelet=getattr(args, "wavelet_weight", 0.0),
+        use_charbonnier=getattr(args, "use_charbonnier", False),
         device=device,
     )
     optimizer = torch.optim.Adam(
@@ -635,10 +693,7 @@ def main():
                 )
                 best_paths[(prior_method, variant)].append(bp)
                 print(f"  Saved -> {bp}")
-                import gc
-                gc.collect()
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
+                cleanup_system(device)
 
 
     # -----------------------------------------------------------------------
@@ -681,6 +736,7 @@ def main():
                         f"CIEDE2000={m['ciede2000']:.4f}  "
                         f"UCIQE={m['uciqe']:.4f}  UIQM={m['uiqm']:.4f}"
                     )
+                    cleanup_system(device, verbose=False)
                 except Exception as exc:
                     print(
                         f"  [ERROR] {prior_method}/{variant} "

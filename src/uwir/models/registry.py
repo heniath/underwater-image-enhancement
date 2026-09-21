@@ -42,6 +42,8 @@ _BACKBONE_VARIANTS = {
     "lsnet": _LEGACY_VARIANTS,
     "fanetplus": _LEGACY_VARIANTS,
     "sgmanet": _LEGACY_VARIANTS,
+    "fgdpa": _LEGACY_VARIANTS,
+    "fgdpaslim": _LEGACY_VARIANTS,
 }
 
 ALL_MODEL_NAMES = [
@@ -65,8 +67,8 @@ def parse_model_variant(name: str) -> ModelSpec:
 
 
 def build_model(name: str, pretrained_backbone: bool = False) -> nn.Module:
-    """Build a paper U-Net, retained UW-LYT, NAFNet, FA-Net, FA*Net-Plus, MobileIE, LiteEnhanceNet, or LSNet variant."""
-    del pretrained_backbone
+    """Build a paper U-Net, retained UW-LYT, NAFNet, FA-Net, FA*Net-Plus, MobileIE, LiteEnhanceNet, LSNet, or FGDPA variant."""
+    is_pretrained = bool(pretrained_backbone)
     backbone, in_channels, physics_schema = parse_model_variant(name)
 
     if backbone == "unet":
@@ -118,6 +120,16 @@ def build_model(name: str, pretrained_backbone: bool = False) -> nn.Module:
         from .sgmanet import build_sgmanet
 
         return build_sgmanet(in_channels=in_channels)
+
+    if backbone == "fgdpa":
+        from .fgdpa import build_fgdpa
+
+        return build_fgdpa(in_channels=in_channels)
+
+    if backbone == "fgdpaslim":
+        from .fgdpa import build_fgdpaslim
+
+        return build_fgdpaslim(in_channels=in_channels, pretrained=is_pretrained)
 
 
 

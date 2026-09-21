@@ -277,10 +277,13 @@ def save_ckpt(model, optimizer, epoch, metrics, path):
 
 def load_ckpt(path, model, optimizer=None, device="cpu"):
     ckpt = torch.load(path, map_location=device)
-    _unwrap(model).load_state_dict(ckpt["model"])
-    if optimizer and "optimizer" in ckpt:
+    state = ckpt["model"] if isinstance(ckpt, dict) and "model" in ckpt else ckpt
+    _unwrap(model).load_state_dict(state)
+    if optimizer and isinstance(ckpt, dict) and "optimizer" in ckpt:
         optimizer.load_state_dict(ckpt["optimizer"])
-    return ckpt["epoch"], ckpt.get("metrics", {})
+    epoch = ckpt.get("epoch", 0) if isinstance(ckpt, dict) else 0
+    metrics = ckpt.get("metrics", {}) if isinstance(ckpt, dict) else {}
+    return epoch, metrics
 
 
 # ============================================================
@@ -295,21 +298,35 @@ def train_epoch(
     criterion,
     device,
     scaler=None,
+    amp_enabled: bool | None = None,
+    amp_dtype: torch.dtype = torch.float16,
     accumulation_steps: int = 1,
     desc: str | None = None,
 ):
     model.train()
     tot_loss = 0.0
-    comps = {"l1": 0.0, "perceptual": 0.0, "ssim_loss": 0.0}
+    comps = {
+        "l1": 0.0,
+        "perceptual": 0.0,
+        "ssim_loss": 0.0,
+        "color": 0.0,
+        "wavelet": 0.0,
+        "lvw": 0.0,
+        "edge": 0.0,
+        "tv": 0.0,
+        "uiqm": 0.0,
+    }
     consecutive_amp_overflows = 0
+
+    if amp_enabled is None:
+        amp_enabled = (scaler is not None and scaler.is_enabled()) or (amp_dtype == torch.bfloat16)
 
     pbar = tqdm(loader, desc=desc or "Train", leave=False, dynamic_ncols=True)
     for batch_idx, (inp, gt) in enumerate(pbar):
-        inp, gt = inp.to(device), gt.to(device)
+        inp, gt = inp.to(device, non_blocking=True), gt.to(device, non_blocking=True)
         if batch_idx % accumulation_steps == 0:
             optimizer.zero_grad(set_to_none=True)
-        amp_enabled = scaler is not None and scaler.is_enabled()
-        with torch.autocast(device_type=device.type, enabled=amp_enabled):
+        with torch.autocast(device_type=device.type, dtype=amp_dtype, enabled=amp_enabled):
             pred = model(inp)
             loss, parts = criterion(pred, gt)
         if not torch.isfinite(loss):
@@ -317,55 +334,48 @@ def train_epoch(
                 f"Non-finite training loss at batch {batch_idx + 1}: {loss.item()}"
             )
         scaled_loss = loss / accumulation_steps
-        if scaler is not None:
+        if scaler is not None and scaler.is_enabled():
             scaler.scale(scaled_loss).backward()
         else:
             scaled_loss.backward()
         should_step = (batch_idx + 1) % accumulation_steps == 0 or batch_idx + 1 == len(loader)
         if should_step:
-            if scaler is not None:
+            scaler_active = scaler is not None and scaler.is_enabled()
+            if scaler_active:
                 scaler.unscale_(optimizer)
-            try:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0, error_if_nonfinite=True)
-            except RuntimeError as exc:
-                if not amp_enabled:
-                    raise FloatingPointError(
-                        f"Non-finite gradient norm at batch {batch_idx + 1}"
-                    ) from exc
-
-                # Overflow is expected occasionally with dynamic loss
-                # scaling. Skip this optimizer step and reduce the scale;
-                # raising immediately prevents GradScaler from doing its job.
-                consecutive_amp_overflows += 1
-                old_scale = scaler.get_scale()
-                bad_parameters = (
-                    [
-                        name
-                        for name, parameter in model.named_parameters()
-                        if parameter.grad is not None and not torch.isfinite(parameter.grad).all()
-                    ]
-                    if consecutive_amp_overflows >= 8
-                    else []
-                )
-                scaler.update(new_scale=max(old_scale / 2.0, 1.0))
-                optimizer.zero_grad(set_to_none=True)
-                print(
-                    f"   [AMP] skipped batch {batch_idx + 1} after gradient overflow; "
-                    f"scale {old_scale:g} -> {scaler.get_scale():g}"
-                )
-                if consecutive_amp_overflows >= 8:
-                    names = ", ".join(bad_parameters[:12]) or "unknown"
-                    raise FloatingPointError(
-                        "Persistent non-finite AMP gradients after 8 scale reductions "
-                        f"at batch {batch_idx + 1}; parameters: {names}"
-                    ) from exc
-            else:
-                consecutive_amp_overflows = 0
-                if scaler is not None:
+                try:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0, error_if_nonfinite=True)
+                except RuntimeError as exc:
+                    consecutive_amp_overflows += 1
+                    old_scale = scaler.get_scale()
+                    bad_parameters = (
+                        [
+                            name
+                            for name, parameter in model.named_parameters()
+                            if parameter.grad is not None and not torch.isfinite(parameter.grad).all()
+                        ]
+                        if consecutive_amp_overflows >= 8
+                        else []
+                    )
+                    scaler.update(new_scale=max(old_scale / 2.0, 1.0))
+                    optimizer.zero_grad(set_to_none=True)
+                    print(
+                        f"   [AMP] skipped batch {batch_idx + 1} after gradient overflow; "
+                        f"scale {old_scale:g} -> {scaler.get_scale():g}"
+                    )
+                    if consecutive_amp_overflows >= 8:
+                        names = ", ".join(bad_parameters[:12]) or "unknown"
+                        raise FloatingPointError(
+                            "Persistent non-finite AMP gradients after 8 scale reductions "
+                            f"at batch {batch_idx + 1}; parameters: {names}"
+                        ) from exc
+                else:
+                    consecutive_amp_overflows = 0
                     scaler.step(optimizer)
                     scaler.update()
-                else:
-                    optimizer.step()
+            else:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                optimizer.step()
 
         tot_loss += loss.item()
         for k in comps:
@@ -383,14 +393,15 @@ def val_loss_epoch(
     criterion,
     device,
     amp_enabled: bool = False,
+    amp_dtype: torch.dtype = torch.float16,
     desc: str | None = None,
 ):
     model.eval()
     tot = 0.0
     pbar = tqdm(loader, desc=desc or "Val", leave=False, dynamic_ncols=True)
     for batch_idx, (inp, gt) in enumerate(pbar):
-        inp, gt = inp.to(device), gt.to(device)
-        with torch.autocast(device_type=device.type, enabled=amp_enabled):
+        inp, gt = inp.to(device, non_blocking=True), gt.to(device, non_blocking=True)
+        with torch.autocast(device_type=device.type, dtype=amp_dtype, enabled=amp_enabled):
             pred = model(inp)
             loss, _ = criterion(pred, gt)
         if not torch.isfinite(loss):
@@ -460,6 +471,12 @@ def main():
     # ------------------------------------------------------------------
     # Device
     # ------------------------------------------------------------------
+    if hasattr(args, "device") and args.device:
+        if args.device.lower() == "cpu":
+            args.gpu_mode = False
+        elif "cuda" in args.device.lower():
+            args.gpu_mode = True
+
     device = torch.device("cuda" if (args.gpu_mode and torch.cuda.is_available()) else "cpu")
     print(f"Device: {device}")
 
@@ -543,6 +560,14 @@ def main():
     n_train, n_val = len(train_ds), len(val_ds)
     print(f"Dataset   : {args.dataset}  (train={n_train}, val={n_val})")
 
+    if device.type == "cuda":
+        torch.backends.cudnn.benchmark = True
+        try:
+            torch.set_float32_matmul_precision("high")
+        except Exception:
+            pass
+
+    use_persistent = args.threads > 0 and device.type == "cuda"
     train_loader = data.DataLoader(
         train_ds,
         batch_size=args.batchSize,
@@ -550,6 +575,8 @@ def main():
         num_workers=args.threads,
         pin_memory=device.type == "cuda",
         drop_last=True,
+        persistent_workers=use_persistent,
+        prefetch_factor=2 if args.threads > 0 else None,
         collate_fn=collate_fn_train,
     )
 
@@ -560,6 +587,8 @@ def main():
         num_workers=args.threads,
         pin_memory=device.type == "cuda",
         drop_last=False,
+        persistent_workers=use_persistent,
+        prefetch_factor=2 if args.threads > 0 else None,
         collate_fn=collate_fn_val,
     )
 
@@ -573,19 +602,37 @@ def main():
         lambda_l1=args.L1_weight,
         lambda_perc=args.perceptual_weight,
         lambda_ssim=args.SSIM_weight,
+        lambda_color=getattr(args, "color_weight", 0.0),
+        lambda_wavelet=getattr(args, "wavelet_weight", 0.0),
+        lambda_lvw=getattr(args, "lvw_weight", 0.0),
+        lambda_edge=getattr(args, "edge_weight", 0.0),
+        lambda_tv=getattr(args, "tv_weight", 0.0),
+        lambda_uiqm=getattr(args, "uiqm_weight", 0.0),
+        use_charbonnier=getattr(args, "use_charbonnier", False),
         device=device,
     )
 
     # ------------------------------------------------------------------
-    # Optimizer & Scheduler
+    # Optimizer & Scheduler & AMP Precision
     # ------------------------------------------------------------------
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     scheduler = build_scheduler(optimizer, args)
+
+    amp_enabled = bool(args.amp and device.type == "cuda")
+    amp_dtype = torch.float16
+    if amp_enabled:
+        req_dtype = getattr(args, "amp_dtype", "auto").lower()
+        if req_dtype == "bfloat16" or (req_dtype == "auto" and torch.cuda.is_bf16_supported()):
+            amp_dtype = torch.bfloat16
+        else:
+            amp_dtype = torch.float16
+
+    scaler_needed = bool(amp_enabled and amp_dtype == torch.float16)
     scaler = torch.amp.GradScaler(
-        "cuda", enabled=args.amp and device.type == "cuda", init_scale=1024.0
+        "cuda", enabled=scaler_needed, init_scale=1024.0
     )
 
-    print(f"Optimizer : AdamW  (lr={args.lr}, amp={scaler.is_enabled()})")
+    print(f"Optimizer : AdamW  (lr={args.lr}, amp={amp_enabled}, dtype={amp_dtype}, scaler={scaler.is_enabled()})")
     print(
         f"Scheduler : {'CosineRestartCyclic' if args.cos_restart_cyclic else 'CosineRestart' if args.cos_restart else 'StepLR'}"
         f"  (warmup={args.warmup_epochs if args.start_warmup else 0} epochs)"
@@ -706,6 +753,8 @@ def main():
             criterion,
             device,
             scaler=scaler,
+            amp_enabled=amp_enabled,
+            amp_dtype=amp_dtype,
             accumulation_steps=args.grad_accumulation_steps,
             desc=f"Ep {epoch}/{args.nEpochs}",
         )
@@ -716,7 +765,8 @@ def main():
             val_loader,
             criterion,
             device,
-            amp_enabled=scaler.is_enabled(),
+            amp_enabled=amp_enabled,
+            amp_dtype=amp_dtype,
             desc="Val",
         )
 

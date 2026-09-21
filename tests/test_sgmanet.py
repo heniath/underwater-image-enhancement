@@ -143,3 +143,40 @@ def test_sgmanet_forward_backward_gradients():
         if param.requires_grad:
             assert param.grad is not None, f"Parameter {name} has no gradient"
             assert torch.isfinite(param.grad).all(), f"Parameter {name} has non-finite gradient"
+
+
+def test_sgmanet_5ch_full_composite_loss():
+    """Verify sgmanet_5ch backward with all loss components (Charbonnier, SSIM, Color, Wavelet)."""
+    from uwir.losses import CompositeLoss
+
+    model = build_model("sgmanet_5ch", pretrained_backbone=False)
+    model.train()
+    criterion = CompositeLoss(
+        lambda_l1=1.0,
+        lambda_perc=0.05,
+        lambda_ssim=0.3,
+        lambda_color=0.2,
+        lambda_wavelet=0.1,
+        use_charbonnier=True,
+    )
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
+
+    inputs = torch.rand(2, 5, 64, 64)
+    targets = torch.rand(2, 3, 64, 64)
+
+    outputs = model(inputs)
+    assert outputs.shape == (2, 3, 64, 64)
+
+    loss, comps = criterion(outputs, targets)
+    assert torch.isfinite(loss)
+    assert all(torch.isfinite(torch.tensor(v)) for v in comps.values())
+
+    optimizer.zero_grad()
+    loss.backward()
+
+    # Verify gradients exist and are finite
+    for name, param in model.named_parameters():
+        if param.requires_grad:
+            assert param.grad is not None, f"5ch: Parameter {name} has no gradient"
+            assert torch.isfinite(param.grad).all(), f"5ch: Parameter {name} has non-finite gradient"
+

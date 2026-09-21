@@ -27,18 +27,24 @@ def option():
     # ------------------------------------------------------------------
     parser.add_argument(
         "--batchSize",
+        "--batch_size",
+        dest="batchSize",
         type=int,
         default=16,
         help="Training mini-batch size",
     )
     parser.add_argument(
         "--cropSize",
+        "--crop_size",
+        dest="cropSize",
         type=int,
         default=256,
         help="Resize target size for training images (height=width)",
     )
     parser.add_argument(
         "--nEpochs",
+        "--epochs",
+        dest="nEpochs",
         type=int,
         default=200,
         help="Total number of training epochs",
@@ -74,6 +80,12 @@ def option():
         "--weight_decay", type=float, default=1e-5, help="Adam weight decay"
     )
     parser.add_argument("--gpu_mode", type=_str2bool, default=True)
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="cuda",
+        help="Computation device ('cuda' or 'cpu')",
+    )
     parser.add_argument(
         "--num_gpus",
         type=int,
@@ -216,6 +228,48 @@ def option():
         default=0.0,
         help="λ3 — SSIM loss weight",
     )
+    parser.add_argument(
+        "--color_weight",
+        type=float,
+        default=0.0,
+        help="λ4 — Color angle (cosine distance) loss weight",
+    )
+    parser.add_argument(
+        "--wavelet_weight",
+        type=float,
+        default=0.0,
+        help="λ5 — 2D Haar Wavelet frequency domain loss weight",
+    )
+    parser.add_argument(
+        "--use_charbonnier",
+        type=_str2bool,
+        default=False,
+        help="Use smooth Charbonnier loss instead of standard L1",
+    )
+    parser.add_argument(
+        "--lvw_weight",
+        type=float,
+        default=0.0,
+        help="λ6 — Local Variance-Weighted (MobileIE) loss weight",
+    )
+    parser.add_argument(
+        "--edge_weight",
+        type=float,
+        default=0.0,
+        help="λ7 — Sobel Edge / Gradient loss weight",
+    )
+    parser.add_argument(
+        "--tv_weight",
+        type=float,
+        default=0.0,
+        help="λ8 — Total Variation (TV) loss weight",
+    )
+    parser.add_argument(
+        "--uiqm_weight",
+        type=float,
+        default=0.0,
+        help="λ9 — Differentiable UIQM loss weight",
+    )
 
     # ------------------------------------------------------------------
     # Training dataset paths
@@ -341,6 +395,13 @@ def option():
         type=_str2bool,
         default=True,
         help="Use automatic mixed precision on CUDA",
+    )
+    parser.add_argument(
+        "--amp_dtype",
+        type=str,
+        default="auto",
+        choices=["auto", "bfloat16", "float16"],
+        help="AMP precision data type: auto (prefers bfloat16 on Ampere/Ada/Blackwell), bfloat16, or float16",
     )
     parser.add_argument(
         "--grad_accumulation_steps",

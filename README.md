@@ -20,6 +20,7 @@ This repository provides a modular, high-performance framework for **Physics-Inf
   - **SGMA-Net** (Lightweight Mamba-Attention Network): Combines selective state-space sequence modeling with spatial attention.
   - **FA-Net / FA-Net+**: Frequency and feature attention networks for detail sharpening and color correction.
   - **NAFNet-Tiny**: Non-linear activation-free architecture for efficient restoration.
+  - **FGDPA / FGDPA-Slim** (Frequency-Guided Dual-Path Attention, ICME 2026): Ultra-lightweight re-parameterizable architecture (4.23K parameters, 800+ FPS).
   - **LiteEnhanceNet / LSNet / MobileIE**: Edge-optimized architectures for mobile and embedded deployment.
   - **Customized U-Net & UW-LYT**: Paper baseline architectures.
 - **Standardized Datasets**: Built-in loaders for **EUVP** (Underwater Dark, Imagenet, Scenes) and **UIEB** (890 paired real-world images).
@@ -115,6 +116,35 @@ datasets/
     ├── raw-890/             # 890 degraded real-world images
     └── reference-890/       # Corresponding ground truth references
 ```
+
+### UIEB Train/Test Split (800 Train / 90 Test)
+
+To follow the standard research convention dividing UIEB into **800 training pairs** and **90 test pairs**, run the deterministic split script:
+
+```bash
+# Split UIEB-890 into 800 train and 90 test (reproducible seed=42)
+python scripts/split_uieb.py --data_dir ./datasets/UIEB --seed 42
+
+# Optional: use symlinks instead of copying files (requires admin privileges on Windows)
+python scripts/split_uieb.py --data_dir ./datasets/UIEB --seed 42 --symlink
+```
+
+After running the script, the UIEB dataset directory will be organized as:
+
+```text
+datasets/UIEB/
+├── raw-890/             # 890 degraded real-world images (untouched)
+├── reference-890/       # 890 ground truth references (untouched)
+├── train/
+│   ├── input/           # 800 degraded images for training
+│   └── reference/       # 800 corresponding GT images
+├── test/
+│   ├── input/           # 90 degraded images for evaluation
+│   └── reference/       # 90 corresponding GT images
+└── split_manifest.txt   # Manifest recording the exact stems for reproducibility
+```
+
+> **Note**: Both `uwir-train` and `uwir-evaluate` will automatically detect and prioritize `train/` and `test/` subsets if present, seamlessly falling back to `raw-890/` if unsplit.
 
 Refer to [`datasets/README.md`](datasets/README.md) for official download links and extraction details.
 

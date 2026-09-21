@@ -48,6 +48,8 @@ def test_forward_and_small_training_step():
     "lsnet_3ch",
     "sgmanet_3ch",
     "sgmanet_5ch",
+    "fgdpa_3ch",
+    "fgdpa_5ch",
 ])
 def test_tournament_models_training_step(model_name):
     from uwir.models import parse_model_variant
