@@ -40,12 +40,14 @@ ALL_MODEL_NAMES = [
     for backbone, variants in _BACKBONE_VARIANTS.items()
     for variant in variants
 ]
-ALL_MODEL_NAMES.append("learnable_physics_unet")
+ALL_MODEL_NAMES.extend(
+    ("learnable_physics_unet", "learnable_latent_unet", "parameterized_physics_unet")
+)
 
 
 def parse_model_variant(name: str) -> ModelSpec:
     """Parse ``<backbone>_<input variant>`` into its input contract."""
-    if name == "learnable_physics_unet":
+    if name in ("learnable_physics_unet", "learnable_latent_unet", "parameterized_physics_unet"):
         return ModelSpec(name, 3, "none")
     for backbone, variants in _BACKBONE_VARIANTS.items():
         prefix = f"{backbone}_"
@@ -63,10 +65,15 @@ def build_model(name: str, pretrained_backbone: bool = False) -> nn.Module:
     del pretrained_backbone
     backbone, in_channels, physics_schema = parse_model_variant(name)
 
-    if backbone == "learnable_physics_unet":
-        from .learnable_physics import LearnablePhysicsUNet
+    if backbone in ("learnable_physics_unet", "learnable_latent_unet"):
+        from .learnable_physics import LearnableLatentUNet
 
-        return LearnablePhysicsUNet()
+        return LearnableLatentUNet()
+
+    if backbone == "parameterized_physics_unet":
+        from .learnable_physics import ParameterizedPhysicsUNet
+
+        return ParameterizedPhysicsUNet()
 
     if backbone == "unet":
         from .unet import UNet5ch

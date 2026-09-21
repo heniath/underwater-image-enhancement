@@ -281,7 +281,13 @@ def train_epoch(
 ):
     model.train()
     tot_loss = 0.0
-    comps = {"l1": 0.0, "perceptual": 0.0, "ssim_loss": 0.0, "reconstruction": 0.0}
+    comps = {
+        "l1": 0.0,
+        "perceptual": 0.0,
+        "ssim_loss": 0.0,
+        "reconstruction": 0.0,
+        "depth_smoothness": 0.0,
+    }
     consecutive_amp_overflows = 0
 
     # BỎ TQDM, DÙNG ENUMERATE THÔNG THƯỜNG
@@ -552,7 +558,11 @@ def main():
         device=device,
     )
     criterion = (
-        PhysicsConsistentLoss(enhancement_criterion, args.reconstruction_weight)
+        PhysicsConsistentLoss(
+            enhancement_criterion,
+            args.reconstruction_weight,
+            args.depth_smoothness_weight,
+        )
         if getattr(_unwrap(model), "supports_physics_loss", False)
         else enhancement_criterion
     )
@@ -645,6 +655,7 @@ def main():
             "perceptual_weight": args.perceptual_weight,
             "ssim_weight": args.SSIM_weight,
             "reconstruction_weight": args.reconstruction_weight,
+            "depth_smoothness_weight": args.depth_smoothness_weight,
             "scheduler": (
                 "cosine_restart_cyclic"
                 if args.cos_restart_cyclic

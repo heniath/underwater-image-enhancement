@@ -7,13 +7,23 @@ pytest.importorskip("kornia")
 
 from uwir.cli.train import train_epoch
 from uwir.losses import CompositeLoss, PhysicsConsistentLoss
-from uwir.models import LearnablePhysicsUNet, PhysicsOutput, build_model, parse_model_variant
+from uwir.models import (
+    LearnableLatentUNet,
+    LearnablePhysicsUNet,
+    ParameterizedPhysicsOutput,
+    ParameterizedPhysicsUNet,
+    PhysicsOutput,
+    build_model,
+    parse_model_variant,
+)
 
 
 def test_registry_builds_rgb_end_to_end_model():
     spec = parse_model_variant("learnable_physics_unet")
     assert (spec.in_channels, spec.physics_mode) == (3, "none")
     assert isinstance(build_model("learnable_physics_unet"), LearnablePhysicsUNet)
+    assert isinstance(build_model("learnable_latent_unet"), LearnableLatentUNet)
+    assert isinstance(build_model("parameterized_physics_unet"), ParameterizedPhysicsUNet)
 
 
 def test_wavelength_maps_and_reconstruction_contract():
@@ -70,3 +80,42 @@ def test_training_loop_accepts_physics_model():
 
     assert loss >= 0.0
     assert parts["reconstruction"] >= 0.0
+
+
+def test_parameterized_model_derives_ordered_transmission_from_depth():
+    model = ParameterizedPhysicsUNet(extractor_width=8).eval()
+    image = torch.rand(2, 3, 32, 48)
+
+    with torch.no_grad():
+        output = model(image, return_physics=True)
+
+    assert isinstance(output, ParameterizedPhysicsOutput)
+    assert output.depth.shape == (2, 1, 32, 48)
+    assert output.attenuation.shape == (2, 3, 1, 1)
+    assert torch.all((output.depth >= 0.0) & (output.depth <= 1.0))
+    assert torch.all(output.attenuation[:, 0] >= output.attenuation[:, 1])
+    assert torch.all(output.attenuation[:, 1] >= output.attenuation[:, 2])
+    assert torch.all(output.transmission[:, 0] <= output.transmission[:, 1])
+    assert torch.all(output.transmission[:, 1] <= output.transmission[:, 2])
+    assert torch.allclose(
+        output.transmission,
+        torch.exp(-output.attenuation * output.depth),
+    )
+
+
+def test_parameterized_loss_updates_depth_and_water_parameters():
+    model = ParameterizedPhysicsUNet(extractor_width=8)
+    image = torch.rand(1, 3, 32, 32)
+    target = torch.rand_like(image)
+    criterion = PhysicsConsistentLoss(
+        CompositeLoss(lambda_perc=0, lambda_ssim=0),
+        lambda_reconstruction=1.0,
+        lambda_depth_smoothness=0.01,
+    )
+
+    loss, parts = criterion(model(image, return_physics=True), target, image)
+    loss.backward()
+
+    assert parts["depth_smoothness"] >= 0.0
+    assert any(parameter.grad is not None for parameter in model.depth_extractor.parameters())
+    assert any(parameter.grad is not None for parameter in model.water_extractor.parameters())

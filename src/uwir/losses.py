@@ -168,18 +168,37 @@ class CompositeLoss(nn.Module):
 
 
 class PhysicsConsistentLoss(nn.Module):
-    """Supervise enhancement and wavelength-aware underwater reconstruction."""
+    """Supervise enhancement, reconstruction, and physical depth smoothness."""
 
     def __init__(
         self,
         enhancement_loss: CompositeLoss,
         lambda_reconstruction: float = 1.0,
+        lambda_depth_smoothness: float = 0.0,
     ):
         super().__init__()
         if lambda_reconstruction < 0:
             raise ValueError("lambda_reconstruction must be non-negative")
+        if lambda_depth_smoothness < 0:
+            raise ValueError("lambda_depth_smoothness must be non-negative")
         self.enhancement_loss = enhancement_loss
         self.lambda_reconstruction = lambda_reconstruction
+        self.lambda_depth_smoothness = lambda_depth_smoothness
+
+    @staticmethod
+    def _edge_aware_smoothness(depth: torch.Tensor, image: torch.Tensor) -> torch.Tensor:
+        """Encourage smooth depth without smoothing across strong image edges."""
+        depth_dx = torch.abs(depth[..., :, 1:] - depth[..., :, :-1])
+        depth_dy = torch.abs(depth[..., 1:, :] - depth[..., :-1, :])
+        image_dx = torch.mean(
+            torch.abs(image[..., :, 1:] - image[..., :, :-1]), dim=1, keepdim=True
+        )
+        image_dy = torch.mean(
+            torch.abs(image[..., 1:, :] - image[..., :-1, :]), dim=1, keepdim=True
+        )
+        return (depth_dx * torch.exp(-10.0 * image_dx)).mean() + (
+            depth_dy * torch.exp(-10.0 * image_dy)
+        ).mean()
 
     def forward(self, output, target: torch.Tensor, input_image: torch.Tensor | None = None):
         if input_image is None:
@@ -187,7 +206,18 @@ class PhysicsConsistentLoss(nn.Module):
 
         enhancement, parts = self.enhancement_loss(output.enhanced, target)
         reconstruction = F.l1_loss(output.reconstructed, input_image)
-        total = enhancement + self.lambda_reconstruction * reconstruction
+        depth = getattr(output, "depth", None)
+        smoothness = (
+            self._edge_aware_smoothness(depth, input_image)
+            if depth is not None
+            else input_image.new_zeros(())
+        )
+        total = (
+            enhancement
+            + self.lambda_reconstruction * reconstruction
+            + self.lambda_depth_smoothness * smoothness
+        )
         parts["reconstruction"] = reconstruction.item()
+        parts["depth_smoothness"] = smoothness.item()
         parts["total"] = total.item()
         return total, parts

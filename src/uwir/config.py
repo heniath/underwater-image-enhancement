@@ -185,7 +185,8 @@ def option():
             "Model variant (backbone_channels):\n"
             "  Channels: 3ch=RGB only | 4ch_t=RGB+t(x) | 4ch_b=RGB+B | 5ch=RGB+t(x)+B\n"
             "  V2: 6ch_b=RGB+B_RGB | 7ch=RGB+t(x)+B_RGB\n"
-            "  End-to-end: learnable_physics_unet learns T_RGB and B_RGB from RGB\n"
+            "  End-to-end: learnable_latent_unet predicts unconstrained T/B; "
+            "parameterized_physics_unet derives T=exp(-beta*d)\n"
             "  Backbones: unet | uwlyt | uwlyttiny | uwlytv2 | uwlytv2tiny"
         ),
     )
@@ -221,7 +222,13 @@ def option():
         "--reconstruction_weight",
         type=float,
         default=1.0,
-        help="Weight of input reconstruction loss for learnable_physics_unet",
+        help="Weight of input reconstruction loss for end-to-end physics variants",
+    )
+    parser.add_argument(
+        "--depth_smoothness_weight",
+        type=float,
+        default=0.01,
+        help="Edge-aware depth smoothness weight for parameterized_physics_unet",
     )
 
     # ------------------------------------------------------------------
