@@ -1,0 +1,15 @@
+{
+  "epochs": 100,
+  "crop_size": 256,
+  "effective_batch_size": 4,
+  "split_seed": 42,
+  "model_seeds": [
+    0,
+    1,
+    2
+  ],
+  "model_selection_metric": "val_psnr",
+  "validation_frequency": 1,
+  "amp": true,
+  "cache_data": "auto"
+}

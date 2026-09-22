@@ -1,0 +1,76 @@
+{
+  "funie_gan": {
+    "method": "FUnIE-GAN",
+    "paper_title": "Fast Underwater Image Enhancement for Improved Visual Perception",
+    "paper_url": "https://arxiv.org/abs/1903.09766",
+    "source_repository_url": "https://github.com/IRVLab/funie-gan",
+    "source_commit_sha": "b844d9071dadf308ecfeee11aaf602826a9ca6fe",
+    "license": "MIT",
+    "implementation_source": "faithful PyTorch compatibility port of official Keras paired generator2/discriminator",
+    "important_integration_modifications": [
+      "NCHW PyTorch port",
+      "common RGB dataset adapter",
+      "complete resumable GAN state"
+    ]
+  },
+  "ucolor": {
+    "method": "UColor",
+    "paper_title": "Underwater Image Enhancement via Medium Transmission-Guided Multi-Color Space Embedding",
+    "paper_url": "https://doi.org/10.1109/TIP.2021.3076367",
+    "source_repository_url": "https://github.com/Li-Chongyi/Ucolor",
+    "source_commit_sha": "08df481135b400be1083ee705801dd8bb60dc82c",
+    "supporting_reimplementation": {
+      "url": "https://github.com/CV-Reimplementation/Ucolor-Reimplementation",
+      "commit": "2cda66de8c56ebb46b81979361e2aa2f5ebafee4"
+    },
+    "license": "MIT stated in README; official code distributed separately",
+    "implementation_source": "faithful PyTorch reimplementation informed by official release and CV-Reimplementation/Ucolor-Reimplementation",
+    "important_integration_modifications": [
+      "PyTorch/NCHW",
+      "on-the-fly input-only GDCP-compatible transmission estimation",
+      "common checkpoint and evaluator wrappers"
+    ],
+    "reproduction_ambiguity": "The authors' separate TensorFlow bundle was inspected but is not vendored. This attributed PyTorch port preserves its three color spaces, widths, residual stages, channel attention, transmission-guided decoder, and released loss/optimizer, but is not checkpoint-compatible: the original RGB encoder has additional cross-color concatenations, and the local input-only transmission estimator is not bit-identical to the separately generated official depth files."
+  },
+  "unet": {
+    "method": "U-Net",
+    "paper_title": "Project comparison RGB U-Net baseline",
+    "paper_url": null,
+    "source_repository_url": "https://github.com/heniath/underwater-image-enhancement",
+    "source_commit_sha": "32536e322aec30e3fe5af16548ec92e9601991b3",
+    "license": "Apache-2.0",
+    "implementation_source": "implementation/config actually used by this repository/paper",
+    "important_integration_modifications": [
+      "adapter wrapper only; architecture reused directly"
+    ]
+  },
+  "water_net": {
+    "method": "Water-Net",
+    "paper_title": "An Underwater Image Enhancement Benchmark Dataset and Beyond",
+    "paper_url": "https://arxiv.org/abs/1901.05495",
+    "source_repository_url": "https://github.com/Li-Chongyi/Water-Net_Code",
+    "source_commit_sha": "1dbd59af235de2ed3d034f605f587ab199305bd7",
+    "license": "no standalone license file; academic-use attribution in README",
+    "implementation_source": "faithful PyTorch compatibility port of official TensorFlow 1.x topology",
+    "important_integration_modifications": [
+      "NCHW PyTorch port",
+      "OpenCV CLAHE replaces MATLAB adapthisteq",
+      "derived candidates generated after paired crop"
+    ]
+  },
+  "uwformer": {
+    "method": "UWFormer",
+    "paper_title": "UWFormer: Underwater Image Enhancement via a Semi-Supervised Multi-Scale Transformer",
+    "paper_url": "https://arxiv.org/abs/2310.20210",
+    "source_repository_url": "https://github.com/leiyingtie/UWFormer",
+    "source_commit_sha": "dde9c688903eb076bf47ff5e6eec4a8c05163e4d",
+    "license": "no license file in source repository",
+    "implementation_source": "faithful dependency-free PyTorch compatibility port of released wavelet/LPViT/FFC formulation",
+    "important_integration_modifications": [
+      "built-in Haar DWT replaces pytorch_wavelets",
+      "built-in window attention replaces timm helper",
+      "common checkpoint adapter"
+    ],
+    "reproduction_ambiguity": "Released training code is supervised despite the paper's semi-supervised title, so this benchmark retains the released paired objective. The dependency-free low-frequency port preserves windowed transformer processing but is not parameter-for-parameter checkpoint compatible with the released LPViT/NAFNet code."
+  }
+}

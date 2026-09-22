@@ -1,0 +1,11 @@
+{
+  "git_commit_sha": "32536e322aec30e3fe5af16548ec92e9601991b3",
+  "git_dirty": true,
+  "python": "3.13.13",
+  "pytorch": "2.13.0+cu130",
+  "torchvision": "0.28.0+cu130",
+  "cuda_runtime": "13.0",
+  "cuda_available": false,
+  "gpu": null,
+  "platform": "Linux-7.0.0-31-generic-x86_64-with-glibc2.39"
+}

@@ -8,6 +8,10 @@ output/
 weights/
 tmp_ckpt*/
 artifacts/
+outputs/reference_methods/cache/
+outputs/reference_methods/smoke/
+outputs/reference_methods/UIEB/
+outputs/reference_methods/LSUI/
 figures/
 logs/*.log
 logs/*.done

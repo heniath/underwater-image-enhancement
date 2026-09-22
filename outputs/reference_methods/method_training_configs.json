@@ -1,0 +1,52 @@
+{
+  "funie_gan": {
+    "input_formulation": "RGB scaled to [-1,1]",
+    "architecture": "official generator2; conditional four-block PatchGAN discriminator",
+    "losses": "0.2 LSGAN-MSE + 0.8*(0.7 MAE + 0.3 VGG19 block5_conv2 feature MSE)",
+    "optimizers": "Adam(G) and Adam(D), lr=3e-4, betas=(0.5,0.999)",
+    "schedulers": "none",
+    "trainable_initialization": "generator and discriminator initialized from scratch",
+    "fixed_pretrained_auxiliary_modules": "ImageNet VGG19 content features",
+    "native_output": "tanh [-1,1], converted once to RGB [0,1]"
+  },
+  "ucolor": {
+    "input_formulation": "RGB/HSV/Lab encoders plus one-channel GDCP-compatible transmission/depth guidance derived only from degraded RGB",
+    "architecture": "three RGB/HSV/Lab encoders with 128/256/512 widths and two residual blocks per scale; channel-attention fusion; 512/256/128 transmission-guided decoder",
+    "losses": "5*MSE + 0.05*ImageNet VGG19 relu5_4 feature MSE",
+    "optimizers": "Adam lr=1e-4, betas=(0.5,0.999)",
+    "schedulers": "none in the official training code",
+    "trainable_initialization": "restoration network initialized from scratch",
+    "fixed_pretrained_auxiliary_modules": "ImageNet VGG19 feature extractor (fixed)",
+    "native_output": "linear RGB; common inference adapter clips once to [0,1]"
+  },
+  "unet": {
+    "input_formulation": "RGB [0,1]",
+    "architecture": "4-level U-Net, widths 64/128/256/512, 1024 bottleneck, Conv-BN-ReLU x2, bilinear decoder, sigmoid head",
+    "losses": "L1 + ImageNet VGG16 relu1_2/relu2_2 feature L1 (weights 1.0/1.0)",
+    "optimizers": "Adam lr=2e-4",
+    "schedulers": "single 100-epoch cosine-restart period, eta_min=1e-6",
+    "trainable_initialization": "restoration U-Net initialized from scratch",
+    "fixed_pretrained_auxiliary_modules": "ImageNet VGG16 for perceptual loss",
+    "native_output": "sigmoid RGB [0,1]"
+  },
+  "water_net": {
+    "input_formulation": "RGB plus input-only white-balanced, CLAHE, and gamma=0.7 candidates",
+    "architecture": "three refinement branches plus 3-map gated confidence fusion",
+    "losses": "L1 + 0.05*ImageNet VGG19 relu5_4 feature MSE",
+    "optimizers": "Adam lr=1e-3, beta1=0.9 (official executed code)",
+    "schedulers": "none",
+    "trainable_initialization": "gated fusion network initialized from scratch",
+    "fixed_pretrained_auxiliary_modules": "ImageNet VGG19 perceptual network",
+    "native_output": "fusion RGB; evaluator clamps once to [0,1]"
+  },
+  "uwformer": {
+    "input_formulation": "RGB [0,1], one-level Haar DWT; low-frequency transformer and high-frequency FFC paths",
+    "architecture": "LPViT-compatible window transformer low path plus nine Fourier residual high-path blocks",
+    "losses": "VGG16 relu1_2/relu2_2/relu3_3 feature MSE + pixel MSE + 0.4*(1-SSIM)",
+    "optimizers": "AdamW lr=2e-4, betas=(0.9,0.999), eps=1e-8",
+    "schedulers": "CosineAnnealingLR T_max=100 eta_min=2e-4 (constant by released config)",
+    "trainable_initialization": "low/high-frequency restoration paths initialized from scratch",
+    "fixed_pretrained_auxiliary_modules": "ImageNet VGG16 perceptual network",
+    "native_output": "unbounded residual RGB; evaluator clamps once to [0,1]"
+  }
+}
