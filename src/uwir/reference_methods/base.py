@@ -25,6 +25,7 @@ class ReferenceMethodAdapter(ABC):
         self.schedulers: dict[str, Any] = {}
         self.scaler = torch.amp.GradScaler("cuda", enabled=self.amp)
         self.method_state: dict[str, Any] = {}
+        self._stepped_optimizer_ids: set[int] = set()
         self.build()
 
     @abstractmethod
@@ -81,7 +82,14 @@ class ReferenceMethodAdapter(ABC):
 
     def step_schedulers(self) -> None:
         for scheduler in self.schedulers.values():
-            scheduler.step()
+            optimizer = getattr(scheduler, "optimizer", None)
+            if optimizer is None or id(optimizer) in self._stepped_optimizer_ids:
+                scheduler.step()
+        self._stepped_optimizer_ids.clear()
+
+    def record_optimizer_step(self, optimizer: torch.optim.Optimizer) -> None:
+        """Record a completed update so its epoch scheduler may advance."""
+        self._stepped_optimizer_ids.add(id(optimizer))
 
     def network_benchmark_call(self, degraded: torch.Tensor) -> tuple[nn.Module, tuple[Any, ...]]:
         """Return the inference network and already-prepared network inputs."""
@@ -178,6 +186,11 @@ def backward_and_step(
 ) -> None:
     adapter.scaler.scale(loss / accumulation_steps).backward()
     if update:
+        previous_scale = adapter.scaler.get_scale()
         adapter.scaler.step(optimizer)
         adapter.scaler.update()
+        # GradScaler lowers its scale when non-finite gradients cause it to
+        # skip optimizer.step(). Do not advance the LR schedule in that case.
+        if adapter.scaler.get_scale() >= previous_scale:
+            adapter.record_optimizer_step(optimizer)
         optimizer.zero_grad(set_to_none=True)

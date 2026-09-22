@@ -10,7 +10,14 @@ from PIL import Image
 from uwir.datasets.lsui import prepare_lsui_splits
 from uwir.datasets.uieb import prepare_uieb_splits
 from uwir.evaluation.quality_metrics import evaluate_pair
+from uwir.reference_methods import (
+    CODE_BACKED_REFERENCE_METHODS,
+    REFERENCE_METHODS,
+    SUPPLEMENTAL_REIMPLEMENTATIONS,
+)
+from uwir.reference_methods.base import ReferenceMethodAdapter, backward_and_step
 from uwir.reference_methods.funie_gan import FUnIEDiscriminator, FUnIEGenerator
+from uwir.reference_methods.lpd_net import LPDNet, _msrcr_prior
 from uwir.reference_methods.ucolor import UColorNet, _gdcp_transmission
 from uwir.reference_methods.uwformer import UWFormer, _FourierResidual
 from uwir.reference_methods.waternet import WaterNet, _waternet_inputs
@@ -90,7 +97,69 @@ def test_rng_state_round_trip_supports_exact_resume():
     assert torch.equal(actual[2], expected[2])
 
 
-@pytest.mark.parametrize("name", ["funie", "water", "ucolor", "uwformer"])
+def test_code_backed_methods_are_prioritized_over_paper_only_reimplementations():
+    assert list(CODE_BACKED_REFERENCE_METHODS) == [
+        "funie_gan",
+        "ucolor",
+        "unet",
+        "water_net",
+        "uwformer",
+    ]
+    assert list(SUPPLEMENTAL_REIMPLEMENTATIONS) == ["lpd_net"]
+    assert list(REFERENCE_METHODS) == [*CODE_BACKED_REFERENCE_METHODS, "lpd_net"]
+
+
+def test_scheduler_advances_only_after_a_completed_optimizer_update():
+    class ScheduledAdapter(ReferenceMethodAdapter):
+        def build(self):
+            model = torch.nn.Linear(1, 1)
+            optimizer = torch.optim.SGD(model.parameters(), lr=1.0)
+            self.modules = {"restoration": model}
+            self.optimizers = {"restoration": optimizer}
+            self.schedulers = {
+                "restoration": torch.optim.lr_scheduler.StepLR(optimizer, 1, gamma=0.5)
+            }
+
+        def train_step(self, batch, *, accumulation_steps=1, update=True):
+            raise NotImplementedError
+
+        def _inference_native(self, degraded):
+            raise NotImplementedError
+
+        @classmethod
+        def provenance(cls):
+            return {}
+
+        @classmethod
+        def training_config(cls):
+            return {}
+
+    adapter = ScheduledAdapter("cpu", amp=False)
+    adapter.step_schedulers()
+    assert adapter.optimizers["restoration"].param_groups[0]["lr"] == 1.0
+
+    loss = adapter.modules["restoration"](torch.ones(1, 1)).sum()
+    backward_and_step(
+        adapter,
+        loss,
+        adapter.optimizers["restoration"],
+        accumulation_steps=1,
+        update=True,
+    )
+    adapter.step_schedulers()
+    assert adapter.optimizers["restoration"].param_groups[0]["lr"] == 0.5
+
+
+def test_funie_uses_released_pytorch_topology():
+    model = FUnIEGenerator()
+    assert model.down1[0].kernel_size == (4, 4)
+    assert model.down1[0].stride == (2, 2)
+    assert model.down2[0].out_channels == 128
+    assert model.down5[0].out_channels == 256
+    assert isinstance(model.up1.model[0], torch.nn.ConvTranspose2d)
+
+
+@pytest.mark.parametrize("name", ["funie", "water", "ucolor", "uwformer", "lpd_net"])
 def test_reference_network_paths_are_finite_rgb(name):
     image = torch.rand(1, 3, 32, 32)
     if name == "funie":
@@ -99,6 +168,8 @@ def test_reference_network_paths_are_finite_rgb(name):
         model, args = WaterNet(), (image, *_waternet_inputs(image))
     elif name == "ucolor":
         model, args = UColorNet(), (image, _gdcp_transmission(image))
+    elif name == "lpd_net":
+        model, args = LPDNet(), (image, _msrcr_prior(image))
     else:
         model, args = UWFormer(), (image,)
     model.eval()

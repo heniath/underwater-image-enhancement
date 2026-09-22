@@ -44,7 +44,14 @@ class BenchmarkConfig:
     cache_data: bool | str = "auto"
 
 
-PHYSICAL_BATCH_SIZE = {"funie_gan": 4, "ucolor": 1, "unet": 4, "water_net": 4, "uwformer": 1}
+PHYSICAL_BATCH_SIZE = {
+    "funie_gan": 4,
+    "lpd_net": 2,
+    "ucolor": 1,
+    "unet": 4,
+    "water_net": 4,
+    "uwformer": 1,
+}
 
 
 def repository_state(root: Path) -> dict[str, Any]:

@@ -3,15 +3,30 @@
     "method": "FUnIE-GAN",
     "paper_title": "Fast Underwater Image Enhancement for Improved Visual Perception",
     "paper_url": "https://arxiv.org/abs/1903.09766",
-    "source_repository_url": "https://github.com/IRVLab/funie-gan",
-    "source_commit_sha": "b844d9071dadf308ecfeee11aaf602826a9ca6fe",
+    "source_repository_url": "https://github.com/xahidbuffon/FUnIE-GAN",
+    "source_commit_sha": "8f934c834c94e007b00866186b9ee624dc2b7b69",
     "license": "MIT",
-    "implementation_source": "faithful PyTorch compatibility port of official Keras paired generator2/discriminator",
+    "implementation_source": "adapter around the author-released native PyTorch generator and discriminator",
     "important_integration_modifications": [
-      "NCHW PyTorch port",
       "common RGB dataset adapter",
       "complete resumable GAN state"
     ]
+  },
+  "lpd_net": {
+    "method": "LPD-Net",
+    "paper_title": "LPD-Net: lightweight adaptive weight-driven dual-stream network guided by physics-inspired priors for structure-preserving underwater image enhancement",
+    "paper_url": "https://doi.org/10.3389/fcomp.2026.1908061",
+    "source_repository_url": null,
+    "source_commit_sha": "not_available",
+    "license": "paper CC BY; no source-code license or repository provided",
+    "implementation_source": "paper-guided faithful reimplementation from the supplied publication",
+    "important_integration_modifications": [
+      "PyTorch implementation of the documented ANGF/HDA/LKA/CSC topology",
+      "input-only CPU MSRCR preprocessing",
+      "100-epoch external benchmark budget replaces the paper's 500 epochs",
+      "batch 2 with two-step accumulation preserves effective batch 4"
+    ],
+    "reproduction_ambiguity": "No official code was located. The paper does not state exact channel widths, block counts, MSRCR scales/normalization, AdamW weight decay, or differentiable UCIQE normalization. These values are explicitly local compatibility choices, so this must not be described as an exact reproduction."
   },
   "ucolor": {
     "method": "UColor",

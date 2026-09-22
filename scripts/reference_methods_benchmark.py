@@ -16,6 +16,7 @@ from uwir.evaluation.inference_benchmark import benchmark_inference
 from uwir.reference_methods import REFERENCE_METHODS
 from uwir.training.runner import (
     MODEL_SEEDS,
+    PHYSICAL_BATCH_SIZE,
     BenchmarkConfig,
     aggregate_results,
     run_reference_experiment,
@@ -50,7 +51,7 @@ def _smoke_complete(output_root: Path) -> bool:
     with path.open(newline="", encoding="utf-8") as handle:
         combinations = {(row["dataset"], row["method"]) for row in csv.DictReader(handle)}
     expected = {(dataset, method) for dataset in ("UIEB", "LSUI") for method in REFERENCE_METHODS}
-    return combinations == expected
+    return expected.issubset(combinations)
 
 
 def _write_efficiency(output_root: Path, device: str | None):
@@ -92,7 +93,7 @@ def _print_preflight(config: BenchmarkConfig, discovered, output_root: Path, *, 
             all(key in cls.training_config() for key in ("losses", "optimizers", "schedulers"))
             for cls in REFERENCE_METHODS.values()
         ),
-        "all 10 smoke combinations passed": not full or _smoke_complete(output_root),
+        "all method/dataset smoke combinations passed": not full or _smoke_complete(output_root),
     }
     print("\nPreflight")
     for label, passed in checks.items():
@@ -138,12 +139,12 @@ def main(argv=None) -> int:
 
     _print_preflight(config, discovered, output_root, full=args.full)
     if args.full and not _smoke_complete(output_root):
-        raise RuntimeError("All 10 dataset x method smoke combinations must pass before --full")
+        raise RuntimeError("All dataset x method smoke combinations must pass before --full")
     seeds = [0] if args.smoke else args.seeds
     for dataset_name, datasets in discovered.items():
         for method in args.methods:
             for seed in seeds:
-                accumulation = 4 if method in {"ucolor", "uwformer"} else 1
+                accumulation = config.effective_batch_size // PHYSICAL_BATCH_SIZE[method]
                 run_reference_experiment(
                     dataset_name=dataset_name,
                     method_name=method,

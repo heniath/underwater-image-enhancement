@@ -1,13 +1,24 @@
 {
   "funie_gan": {
     "input_formulation": "RGB scaled to [-1,1]",
-    "architecture": "official generator2; conditional four-block PatchGAN discriminator",
-    "losses": "0.2 LSGAN-MSE + 0.8*(0.7 MAE + 0.3 VGG19 block5_conv2 feature MSE)",
-    "optimizers": "Adam(G) and Adam(D), lr=3e-4, betas=(0.5,0.999)",
+    "architecture": "released five-level PyTorch U-Net generator; conditional four-block PatchGAN discriminator",
+    "losses": "generator: LSGAN-MSE + 7*MAE + 3*VGG19 conv5_2 feature MSE; discriminator: 10*0.5*(real MSE + fake MSE)",
+    "optimizers": "Adam(G) and Adam(D), lr=3e-4, betas=(0.5,0.99)",
     "schedulers": "none",
     "trainable_initialization": "generator and discriminator initialized from scratch",
     "fixed_pretrained_auxiliary_modules": "ImageNet VGG19 content features",
     "native_output": "tanh [-1,1], converted once to RGB [0,1]"
+  },
+  "lpd_net": {
+    "input_formulation": "raw RGB plus deterministic MSRCR prior derived only from degraded RGB",
+    "architecture": "paper-guided dual 3x3 embeddings, spatial difference gate, U-shaped HDA/LKA refiner, CSC decoder, global residual sigmoid output; local width=48 configuration",
+    "losses": "SmoothL1 + 0.2*(1-SSIM) + 0.01*(1-differentiable UCIQE) + 0.1*L1 Laplacian boundary",
+    "optimizers": "AdamW lr=2e-4 (weight decay unspecified by paper; PyTorch default 0.01)",
+    "schedulers": "CosineAnnealingLR over standardized 100 epochs, eta_min=1e-6",
+    "trainable_initialization": "all neural modules initialized from scratch",
+    "fixed_pretrained_auxiliary_modules": "none",
+    "native_output": "sigmoid of learned residual plus raw RGB, [0,1]",
+    "paper_training_difference": "paper reports batch 2, seed 3407, and 500 epochs; benchmark uses effective batch 4, seeds 0/1/2, and 100 epochs"
   },
   "ucolor": {
     "input_formulation": "RGB/HSV/Lab encoders plus one-channel GDCP-compatible transmission/depth guidance derived only from degraded RGB",
