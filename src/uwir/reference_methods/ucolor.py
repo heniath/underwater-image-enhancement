@@ -132,6 +132,7 @@ class UColorNet(nn.Module):
 
 class UColorAdapter(ReferenceMethodAdapter):
     method_name, display_name = "ucolor", "UColor"
+    inference_tile_size, inference_tile_overlap = 256, 32
 
     def build(self) -> None:
         model = UColorNet().to(self.device)
@@ -171,7 +172,13 @@ class UColorAdapter(ReferenceMethodAdapter):
         def restore(tile):
             return self.modules["restoration"](tile[:, :3], tile[:, 3:])
 
-        prediction = tiled_predict(restore, model_input, tile_size=256, overlap=32, factor=4)
+        prediction = tiled_predict(
+            restore,
+            model_input,
+            tile_size=self.inference_tile_size,
+            overlap=self.inference_tile_overlap,
+            factor=4,
+        )
         return prediction[..., :height, :width]
 
     def network_benchmark_call(self, degraded):
@@ -194,6 +201,7 @@ class UColorAdapter(ReferenceMethodAdapter):
             "important_integration_modifications": [
                 "PyTorch/NCHW",
                 "on-the-fly input-only GDCP-compatible transmission estimation",
+                "256-pixel overlap-blended native-resolution inference tiles with 32-pixel overlap",
                 "common checkpoint and evaluator wrappers",
             ],
             "reproduction_ambiguity": "The authors' separate TensorFlow bundle was inspected but is not vendored. This attributed PyTorch port preserves its three color spaces, widths, residual stages, channel attention, transmission-guided decoder, and released loss/optimizer, but is not checkpoint-compatible: the original RGB encoder has additional cross-color concatenations, and the local input-only transmission estimator is not bit-identical to the separately generated official depth files.",
