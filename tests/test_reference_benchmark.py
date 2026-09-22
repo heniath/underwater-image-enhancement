@@ -12,7 +12,7 @@ from uwir.datasets.uieb import prepare_uieb_splits
 from uwir.evaluation.quality_metrics import evaluate_pair
 from uwir.reference_methods.funie_gan import FUnIEDiscriminator, FUnIEGenerator
 from uwir.reference_methods.ucolor import UColorNet, _gdcp_transmission
-from uwir.reference_methods.uwformer import UWFormer
+from uwir.reference_methods.uwformer import UWFormer, _FourierResidual
 from uwir.reference_methods.waternet import WaterNet, _waternet_inputs
 from uwir.training.seed import capture_rng_state, restore_rng_state, seed_everything
 
@@ -130,6 +130,17 @@ def test_pooled_reference_adapters_preserve_odd_native_resolution(
     image = torch.rand(1, 3, 33, 35)
 
     prediction = adapter.inference(image)
+
+    assert prediction.shape == image.shape
+    assert torch.isfinite(prediction).all()
+
+
+def test_uwformer_fourier_path_keeps_fft_in_float32_under_autocast():
+    block = _FourierResidual(4).eval()
+    image = torch.rand(1, 4, 15, 20)
+
+    with torch.no_grad(), torch.autocast("cpu", dtype=torch.bfloat16):
+        prediction = block(image)
 
     assert prediction.shape == image.shape
     assert torch.isfinite(prediction).all()

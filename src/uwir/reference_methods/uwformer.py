@@ -82,14 +82,18 @@ class _FourierResidual(nn.Module):
         self.local = nn.Conv2d(width, width, 3, padding=1, padding_mode="reflect")
 
     def forward(self, x):
-        spectrum = torch.fft.rfft2(x, norm="ortho")
-        packed = torch.cat((spectrum.real, spectrum.imag), 1)
-        packed = self.spectral(packed)
-        real, imaginary = packed.chunk(2, 1)
-        global_features = torch.fft.irfft2(
-            torch.complex(real, imaginary), s=x.shape[-2:], norm="ortho"
-        )
-        return x + self.local(x) + global_features
+        # CUDA half-precision FFT only supports power-of-two signal dimensions.
+        # Native-resolution evaluation includes arbitrary image sizes, so keep
+        # the spectral branch in float32 while allowing the local branch to use AMP.
+        with torch.autocast(device_type=x.device.type, enabled=False):
+            spectrum = torch.fft.rfft2(x.float(), norm="ortho")
+            packed = torch.cat((spectrum.real, spectrum.imag), 1)
+            packed = self.spectral(packed)
+            real, imaginary = packed.chunk(2, 1)
+            global_features = torch.fft.irfft2(
+                torch.complex(real, imaginary), s=x.shape[-2:], norm="ortho"
+            )
+        return x + self.local(x) + global_features.to(x.dtype)
 
 
 class _HighFrequencyPath(nn.Module):
