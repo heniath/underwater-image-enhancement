@@ -9,6 +9,8 @@ from kornia.color import rgb_to_hsv, rgb_to_lab
 from scipy.ndimage import maximum_filter, median_filter
 from torch import nn
 
+from uwir.metrics import tiled_predict
+
 from .base import ReferenceMethodAdapter, VGGFeatureLoss, backward_and_step
 
 
@@ -163,7 +165,14 @@ class UColorAdapter(ReferenceMethodAdapter):
         if pad_h or pad_w:
             mode = "reflect" if height > pad_h and width > pad_w else "replicate"
             degraded = F.pad(degraded, (0, pad_w, 0, pad_h), mode=mode)
-        return self._forward(degraded)[..., :height, :width]
+        transmission = _gdcp_transmission(degraded)
+        model_input = torch.cat((degraded, transmission), 1)
+
+        def restore(tile):
+            return self.modules["restoration"](tile[:, :3], tile[:, 3:])
+
+        prediction = tiled_predict(restore, model_input, tile_size=256, overlap=32, factor=4)
+        return prediction[..., :height, :width]
 
     def network_benchmark_call(self, degraded):
         return self.modules["restoration"], (degraded, _gdcp_transmission(degraded))

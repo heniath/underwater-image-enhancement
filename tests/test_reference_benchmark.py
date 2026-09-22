@@ -18,7 +18,7 @@ from uwir.reference_methods import (
 from uwir.reference_methods.base import ReferenceMethodAdapter, backward_and_step
 from uwir.reference_methods.funie_gan import FUnIEDiscriminator, FUnIEGenerator
 from uwir.reference_methods.lpd_net import LPDNet, _msrcr_prior
-from uwir.reference_methods.ucolor import UColorNet, _gdcp_transmission
+from uwir.reference_methods.ucolor import UColorAdapter, UColorNet, _gdcp_transmission
 from uwir.reference_methods.uwformer import UWFormer, _FourierResidual
 from uwir.reference_methods.waternet import WaterNet, _waternet_inputs
 from uwir.training.seed import capture_rng_state, restore_rng_state, seed_everything
@@ -215,6 +215,22 @@ def test_uwformer_fourier_path_keeps_fft_in_float32_under_autocast():
 
     assert prediction.shape == image.shape
     assert torch.isfinite(prediction).all()
+
+
+def test_ucolor_uses_tiled_native_resolution_inference():
+    class IdentityRestoration(torch.nn.Module):
+        def forward(self, rgb, transmission):
+            assert transmission.shape[1] == 1
+            return rgb
+
+    adapter = object.__new__(UColorAdapter)
+    adapter.modules = {"restoration": IdentityRestoration()}
+    image = torch.rand(1, 3, 257, 259)
+
+    prediction = adapter._inference_native(image)
+
+    assert prediction.shape == image.shape
+    assert torch.allclose(prediction, image, atol=1e-6)
 
 
 def test_funie_discriminator_is_a_training_only_separate_network():
