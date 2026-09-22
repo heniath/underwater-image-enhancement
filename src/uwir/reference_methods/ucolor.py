@@ -158,7 +158,12 @@ class UColorAdapter(ReferenceMethodAdapter):
         return {"total": loss.item(), "mse": mse.item(), "perceptual": perceptual.item()}
 
     def _inference_native(self, degraded):
-        return self._forward(degraded)
+        height, width = degraded.shape[-2:]
+        pad_h, pad_w = (-height) % 4, (-width) % 4
+        if pad_h or pad_w:
+            mode = "reflect" if height > pad_h and width > pad_w else "replicate"
+            degraded = F.pad(degraded, (0, pad_w, 0, pad_h), mode=mode)
+        return self._forward(degraded)[..., :height, :width]
 
     def network_benchmark_call(self, degraded):
         return self.modules["restoration"], (degraded, _gdcp_transmission(degraded))

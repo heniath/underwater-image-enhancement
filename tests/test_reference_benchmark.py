@@ -108,6 +108,33 @@ def test_reference_network_paths_are_finite_rgb(name):
     assert torch.isfinite(output).all()
 
 
+@pytest.mark.parametrize(
+    ("module_name", "adapter_name"),
+    [
+        ("uwir.reference_methods.funie_gan", "FUnIEGANAdapter"),
+        ("uwir.reference_methods.ucolor", "UColorAdapter"),
+    ],
+)
+def test_pooled_reference_adapters_preserve_odd_native_resolution(
+    monkeypatch, module_name, adapter_name
+):
+    module = __import__(module_name, fromlist=[adapter_name])
+
+    class TinyContent(torch.nn.Module):
+        def forward(self, prediction, target):
+            return torch.nn.functional.mse_loss(prediction, target)
+
+    monkeypatch.setattr(module, "VGGFeatureLoss", lambda *_args, **_kwargs: TinyContent())
+    adapter = getattr(module, adapter_name)("cpu", amp=False)
+    adapter.eval()
+    image = torch.rand(1, 3, 33, 35)
+
+    prediction = adapter.inference(image)
+
+    assert prediction.shape == image.shape
+    assert torch.isfinite(prediction).all()
+
+
 def test_funie_discriminator_is_a_training_only_separate_network():
     discriminator = FUnIEDiscriminator()
     result = discriminator(torch.rand(1, 3, 32, 32), torch.rand(1, 3, 32, 32))

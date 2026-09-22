@@ -122,7 +122,13 @@ class FUnIEGANAdapter(ReferenceMethodAdapter):
         }
 
     def _inference_native(self, degraded):
-        return self.modules["generator"](degraded.mul(2).sub(1)).add(1).mul(0.5)
+        height, width = degraded.shape[-2:]
+        pad_h, pad_w = (-height) % 8, (-width) % 8
+        if pad_h or pad_w:
+            mode = "reflect" if height > pad_h and width > pad_w else "replicate"
+            degraded = F.pad(degraded, (0, pad_w, 0, pad_h), mode=mode)
+        prediction = self.modules["generator"](degraded.mul(2).sub(1)).add(1).mul(0.5)
+        return prediction[..., :height, :width]
 
     def network_benchmark_call(self, degraded):
         return self.modules["generator"], (degraded.mul(2).sub(1),)
