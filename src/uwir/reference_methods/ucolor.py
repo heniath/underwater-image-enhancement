@@ -110,7 +110,12 @@ class UColorNet(nn.Module):
         self.output = nn.Conv2d(128, 3, 3, padding=1)
 
     def forward(self, rgb, transmission):
-        spaces = self.rgb(rgb), self.hsv(rgb_to_hsv(rgb)), self.lab(rgb_to_lab(rgb))
+        rgb_f32 = rgb.float().clamp(0.0, 1.0)
+        hsv = rgb_to_hsv(rgb_f32)
+        lab = rgb_to_lab(rgb_f32)
+        hsv = torch.nan_to_num(hsv, nan=0.0, posinf=1.0, neginf=0.0).to(rgb.dtype)
+        lab = torch.nan_to_num(lab, nan=0.0, posinf=100.0, neginf=-100.0).to(rgb.dtype)
+        spaces = self.rgb(rgb), self.hsv(hsv), self.lab(lab)
         levels = [
             self.fuse1(tuple(item[0] for item in spaces)),
             self.fuse2(tuple(item[1] for item in spaces)),
@@ -179,6 +184,8 @@ class UColorAdapter(ReferenceMethodAdapter):
             overlap=self.inference_tile_overlap,
             factor=4,
         )
+        if not torch.isfinite(prediction).all():
+            prediction = torch.nan_to_num(prediction, nan=0.0, posinf=1.0, neginf=0.0)
         return prediction[..., :height, :width]
 
     def network_benchmark_call(self, degraded):

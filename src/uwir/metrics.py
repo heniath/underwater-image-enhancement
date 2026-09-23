@@ -180,17 +180,18 @@ def tiled_predict(
         padded = F.pad(padded, (0, extra_w, 0, extra_h), mode="replicate")
         height, width = padded.shape[-2:]
 
-    output = torch.zeros((1, 3, height, width), device=image.device, dtype=image.dtype)
-    weights = torch.zeros_like(output[:, :1])
-    window_1d = torch.hann_window(tile_size, periodic=False, device=image.device).clamp_min(0.05)
+    output = torch.zeros((1, 3, height, width), device=image.device, dtype=torch.float32)
+    weights = torch.zeros((1, 1, height, width), device=image.device, dtype=torch.float32)
+    window_1d = torch.hann_window(tile_size, periodic=False, device=image.device, dtype=torch.float32).clamp_min(0.05)
     window = (window_1d[:, None] * window_1d[None, :])[None, None]
     for top in _tile_starts(height, tile_size, overlap):
         for left in _tile_starts(width, tile_size, overlap):
             tile = padded[..., top : top + tile_size, left : left + tile_size]
-            prediction = model(tile)
+            prediction = model(tile).float()
             output[..., top : top + tile_size, left : left + tile_size] += prediction * window
             weights[..., top : top + tile_size, left : left + tile_size] += window
-    return (output / weights.clamp_min(1e-8))[..., :original_h, :original_w]
+    result = (output / weights.clamp_min(1e-8))[..., :original_h, :original_w]
+    return result.to(image.dtype)
 
 
 @torch.no_grad()

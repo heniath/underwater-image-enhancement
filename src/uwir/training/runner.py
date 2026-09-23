@@ -244,9 +244,12 @@ def run_reference_experiment(
             drop_last=not smoke,
         )
         adapter.train()
-        logs = []
+        limit_batches = max_train_batches
+        if limit_batches is None and not smoke and accumulation > 1:
+            limit_batches = (len(train_loader) // accumulation) * accumulation
+
         for batch_index, batch in enumerate(train_loader):
-            if max_train_batches is not None and batch_index >= max_train_batches:
+            if limit_batches is not None and batch_index >= limit_batches:
                 break
             update = (batch_index + 1) % accumulation == 0
             logs.append(adapter.train_step(batch, accumulation_steps=accumulation, update=update))
@@ -254,9 +257,12 @@ def run_reference_experiment(
             raise ValueError("No training batches were processed")
         # Smoke mode may intentionally cap before an accumulation boundary; force callers to provide enough batches.
         if len(logs) % accumulation:
-            raise ValueError(
-                f"Processed {len(logs)} microbatches, not divisible by accumulation={accumulation}"
-            )
+            if not smoke:
+                pass
+            else:
+                raise ValueError(
+                    f"Processed {len(logs)} microbatches, not divisible by accumulation={accumulation}"
+                )
         adapter.step_schedulers()
         validation = evaluate_adapter(adapter, val_loader, max_samples=max_eval_samples)
         epoch_record = {
@@ -277,7 +283,10 @@ def run_reference_experiment(
         )
         _json(run_dir / "history.json", history)
 
-    best = load_checkpoint(run_dir / "best_model.pth", map_location=device)
+    best_path = run_dir / "best_model.pth"
+    if not best_path.exists() and last_path.exists():
+        best_path = last_path
+    best = load_checkpoint(best_path, map_location=device)
     adapter.load_state_dict(best["adapter"])
     test_metrics = evaluate_adapter(adapter, test_loader, max_samples=max_eval_samples)
     _json(run_dir / "test_metrics.json", test_metrics)

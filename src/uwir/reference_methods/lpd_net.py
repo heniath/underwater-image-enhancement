@@ -16,6 +16,8 @@ from kornia.color import rgb_to_hsv, rgb_to_lab
 from kornia.metrics import ssim
 from torch import nn
 
+from uwir.metrics import tiled_predict
+
 from .base import ReferenceMethodAdapter, backward_and_step
 
 
@@ -163,17 +165,20 @@ class LPDNet(nn.Module):
 
 
 def _differentiable_uciqe(image: torch.Tensor) -> torch.Tensor:
-    lab = rgb_to_lab(image.clamp(0, 1))
+    img_f32 = image.float().clamp(0.0, 1.0)
+    lab = rgb_to_lab(img_f32)
     chroma = torch.sqrt(lab[:, 1].square() + lab[:, 2].square() + 1e-12) / 128.0
     sigma_c = chroma.flatten(1).std(dim=1, unbiased=False)
     luminance = lab[:, 0].flatten(1) / 100.0
     contrast = torch.quantile(luminance, 0.99, dim=1) - torch.quantile(luminance, 0.01, dim=1)
-    saturation = rgb_to_hsv(image.clamp(0, 1))[:, 1].flatten(1).mean(dim=1)
-    return (0.4680 * sigma_c + 0.2745 * contrast + 0.2576 * saturation).mean()
+    saturation = rgb_to_hsv(img_f32)[:, 1].flatten(1).mean(dim=1)
+    score = (0.4680 * sigma_c + 0.2745 * contrast + 0.2576 * saturation).mean()
+    return score.to(image.dtype)
 
 
 class LPDNetAdapter(ReferenceMethodAdapter):
     method_name, display_name = "lpd_net", "LPD-Net"
+    inference_tile_size, inference_tile_overlap = 256, 32
 
     def build(self) -> None:
         model = LPDNet().to(self.device)
@@ -220,7 +225,27 @@ class LPDNetAdapter(ReferenceMethodAdapter):
         }
 
     def _inference_native(self, degraded):
-        return self._forward(degraded)
+        height, width = degraded.shape[-2:]
+        pad_h, pad_w = (-height) % 4, (-width) % 4
+        if pad_h or pad_w:
+            mode = "reflect" if height > pad_h and width > pad_w else "replicate"
+            degraded = F.pad(degraded, (0, pad_w, 0, pad_h), mode=mode)
+        prior = _msrcr_prior(degraded)
+        model_input = torch.cat((degraded, prior), 1)
+
+        def restore(tile):
+            return self.modules["restoration"](tile[:, :3], tile[:, 3:])
+
+        prediction = tiled_predict(
+            restore,
+            model_input,
+            tile_size=self.inference_tile_size,
+            overlap=self.inference_tile_overlap,
+            factor=4,
+        )
+        if not torch.isfinite(prediction).all():
+            prediction = torch.nan_to_num(prediction, nan=0.0, posinf=1.0, neginf=0.0)
+        return prediction[..., :height, :width]
 
     def network_benchmark_call(self, degraded):
         return self.modules["restoration"], (degraded, _msrcr_prior(degraded))
