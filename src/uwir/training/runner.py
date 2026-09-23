@@ -147,6 +147,15 @@ def _append_result(path: Path, row: dict[str, Any]):
         writer.writerows(rows)
 
 
+def _primary_loss_value(metrics: dict[str, float]) -> float:
+    for key in ("total", "loss", "g_loss", "generator", "pixel", "smooth_l1"):
+        if key in metrics:
+            return float(metrics[key])
+    if metrics:
+        return float(next(iter(metrics.values())))
+    return 0.0
+
+
 def run_reference_experiment(
     *,
     dataset_name: str,
@@ -269,11 +278,14 @@ def run_reference_experiment(
             update = (batch_index + 1) % accumulation == 0
             step_log = adapter.train_step(batch, accumulation_steps=accumulation, update=update)
             logs.append(step_log)
-            if not smoke and ((batch_index + 1) % 100 == 0 or (batch_index + 1) == total_batches):
-                step_loss = step_log.get("loss", 0.0)
+            if not smoke and ((batch_index + 1) % 50 == 0 or (batch_index + 1) == total_batches):
+                step_loss = _primary_loss_value(step_log)
+                batch_elapsed = time.time() - epoch_t0
+                pct = ((batch_index + 1) / total_batches) * 100
                 print(
                     f"  [{dataset_name}-{method_name}-s{model_seed}] Ep {epoch:3d}/{epochs:3d} | "
-                    f"Batch {batch_index + 1:4d}/{total_batches:4d} | step_loss={step_loss:.4f}",
+                    f"Batch {batch_index + 1:4d}/{total_batches:4d} ({pct:4.1f}%) | "
+                    f"loss={step_loss:.4f} | elapsed={batch_elapsed:5.1f}s",
                     flush=True,
                 )
         if not logs:
@@ -309,15 +321,16 @@ def run_reference_experiment(
         _json(run_dir / "history.json", history)
 
         elapsed = time.time() - epoch_t0
-        train_loss = epoch_record["train"].get("loss", next(iter(epoch_record["train"].values()), 0.0))
+        train_loss = _primary_loss_value(epoch_record["train"])
         val_psnr = validation.get("psnr", 0.0)
         val_ssim = validation.get("ssim", 0.0)
-        best_tag = " [*BEST*]" if is_best else ""
+        best_tag = " [NEW BEST]" if is_best else ""
         print(
-            f"[{mode_str}][{dataset_name}|{method_name}|s{model_seed}] "
-            f"Epoch {epoch:3d}/{epochs:3d} ({elapsed:5.1f}s) | "
-            f"train_loss={train_loss:.4f} | val_psnr={val_psnr:.2f}dB val_ssim={val_ssim:.4f} "
-            f"(best={best_psnr:.2f}dB @ ep {best_epoch}){best_tag}",
+            f"\n========================================================================================\n"
+            f"[{mode_str}][{dataset_name}|{method_name}|s{model_seed}] EPOCH {epoch:3d}/{epochs:3d} FINISHED in {elapsed:5.1f}s\n"
+            f"  * Train Loss : {train_loss:.4f}\n"
+            f"  * Val PSNR   : {val_psnr:.2f} dB | Val SSIM: {val_ssim:.4f} | Best PSNR: {best_psnr:.2f} dB @ Ep {best_epoch}{best_tag}\n"
+            f"========================================================================================\n",
             flush=True,
         )
 
