@@ -6,6 +6,7 @@ import csv
 import json
 import platform
 import subprocess
+import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -185,6 +186,10 @@ def run_reference_experiment(
     if (run_dir / "test_metrics.json").exists() and existing_config_path.exists() and resume:
         existing_config = json.loads(existing_config_path.read_text(encoding="utf-8"))
         if existing_config.get("completed"):
+            print(
+                f"[{dataset_name.upper()} | {method_name} | Seed {model_seed}] Already completed — skipping.",
+                flush=True,
+            )
             return json.loads((run_dir / "test_metrics.json").read_text(encoding="utf-8"))
     adapter = REFERENCE_METHODS[method_name](device, amp=config.amp)
     repo = repository_state(Path(repository_root))
@@ -232,8 +237,15 @@ def run_reference_experiment(
         if state.get("rng_state"):
             restore_rng_state(state["rng_state"])
 
+    resume_note = f" (resuming from epoch {start_epoch})" if start_epoch > 1 else ""
+    print(
+        f"\n>>> [{dataset_name.upper()} | {method_name} | Seed {model_seed}] "
+        f"Training {epochs} epochs on {device}{resume_note}...",
+        flush=True,
+    )
     adapter.zero_grad()
     for epoch in range(start_epoch, epochs + 1):
+        t_epoch_start = time.perf_counter()
         # An epoch-specific seed makes sample order and worker-side paired
         # augmentation invariant to whether earlier epochs ran in this process.
         train_loader = _loader(
@@ -265,7 +277,8 @@ def run_reference_experiment(
             "validation": {key: value for key, value in validation.items() if key != "per_image"},
         }
         history.append(epoch_record)
-        if validation["psnr"] > best_psnr:
+        is_best = validation["psnr"] > best_psnr
+        if is_best:
             best_psnr, best_epoch = validation["psnr"], epoch
             save_checkpoint(
                 run_dir / "best_model.pth",
@@ -276,6 +289,21 @@ def run_reference_experiment(
             _checkpoint_payload(adapter, epoch, best_psnr, best_epoch, history, run_config),
         )
         _json(run_dir / "history.json", history)
+        elapsed = time.perf_counter() - t_epoch_start
+        train_loss = (
+            epoch_record["train"].get("generator")
+            or epoch_record["train"].get("total")
+            or list(epoch_record["train"].values())[0]
+        )
+        best_str = " (BEST)" if is_best else ""
+        print(
+            f"[{dataset_name.upper()}|{method_name}|s{model_seed}] "
+            f"Epoch {epoch:3d}/{epochs} ({elapsed:.1f}s) | "
+            f"Loss: {train_loss:.4f} | "
+            f"Val PSNR: {validation['psnr']:.2f} dB | "
+            f"Val SSIM: {validation['ssim']:.4f}{best_str}",
+            flush=True,
+        )
 
     best = load_checkpoint(run_dir / "best_model.pth", map_location=device)
     adapter.load_state_dict(best["adapter"])
@@ -284,6 +312,11 @@ def run_reference_experiment(
     run_config["completed"] = True
     run_config["best_epoch"] = best_epoch
     _json(run_dir / "run_config.json", run_config)
+    print(
+        f"[{dataset_name.upper()}|{method_name}|s{model_seed}] Completed! "
+        f"Test PSNR: {test_metrics['psnr']:.2f} dB | Test SSIM: {test_metrics['ssim']:.4f}\n",
+        flush=True,
+    )
     row = {
         "dataset": dataset_name.upper(),
         "method": method_name,
