@@ -248,6 +248,7 @@ def run_reference_experiment(
         if limit_batches is None and not smoke and accumulation > 1:
             limit_batches = (len(train_loader) // accumulation) * accumulation
 
+        logs = []
         for batch_index, batch in enumerate(train_loader):
             if limit_batches is not None and batch_index >= limit_batches:
                 break
