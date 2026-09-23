@@ -123,7 +123,7 @@ def test_amp_gradient_overflow_skips_step_and_reduces_scale():
     loader = DataLoader(TensorDataset(inputs, targets), batch_size=1)
     scaler = FakeScaler()
 
-    def criterion(prediction, _target):
+    def criterion(prediction, _target, **kwargs):
         return prediction.mean(), {"l1": 1.0}
 
     train_epoch(
