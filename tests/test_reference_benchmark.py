@@ -21,6 +21,7 @@ from uwir.reference_methods.lpd_net import LPDNet, _msrcr_prior
 from uwir.reference_methods.ucolor import UColorAdapter, UColorNet, _gdcp_transmission
 from uwir.reference_methods.uwformer import UWFormer, _FourierResidual
 from uwir.reference_methods.waternet import WaterNet, _waternet_inputs
+from uwir.training.checkpoint import load_checkpoint, save_checkpoint
 from uwir.training.seed import capture_rng_state, restore_rng_state, seed_everything
 
 
@@ -157,6 +158,34 @@ def test_funie_uses_released_pytorch_topology():
     assert model.down2[0].out_channels == 128
     assert model.down5[0].out_channels == 256
     assert isinstance(model.up1.model[0], torch.nn.ConvTranspose2d)
+
+
+def test_restore_rng_state_handles_checkpoint_and_device_normalization(tmp_path):
+    seed_everything(42)
+    state = capture_rng_state()
+    ckpt_path = tmp_path / "test_ckpt.pth"
+    save_checkpoint(
+        ckpt_path,
+        {
+            "adapter": {},
+            "epoch": 1,
+            "best_val_psnr": 20.0,
+            "best_epoch": 1,
+            "history": [],
+            "run_config": {},
+            "rng_state": state,
+        },
+    )
+    loaded = load_checkpoint(ckpt_path, map_location="cpu")
+    restore_rng_state(loaded["rng_state"])
+    val1 = torch.rand(1)
+
+    seed_everything(42)
+    state2 = capture_rng_state()
+    state2["torch_cpu"] = state2["torch_cpu"].clone()
+    restore_rng_state(state2)
+    val2 = torch.rand(1)
+    assert torch.equal(val1, val2)
 
 
 @pytest.mark.parametrize("name", ["funie", "water", "ucolor", "uwformer", "lpd_net"])

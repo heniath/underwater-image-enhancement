@@ -46,6 +46,18 @@ def restore_rng_state(state: dict[str, object]) -> None:
     """Restore a state produced by :func:`capture_rng_state`."""
     random.setstate(state["python"])
     np.random.set_state(state["numpy"])
-    torch.set_rng_state(state["torch_cpu"])
+    torch_cpu = state["torch_cpu"]
+    if isinstance(torch_cpu, torch.Tensor):
+        torch_cpu = torch_cpu.to(device="cpu", dtype=torch.uint8)
+    elif torch_cpu is not None:
+        torch_cpu = torch.as_tensor(torch_cpu, dtype=torch.uint8, device="cpu")
+    if torch_cpu is not None:
+        torch.set_rng_state(torch_cpu)
     if torch.cuda.is_available() and state.get("torch_cuda"):
-        torch.cuda.set_rng_state_all(state["torch_cuda"])
+        devices = torch.cuda.device_count()
+        cuda_states = [
+            t.to(device="cpu", dtype=torch.uint8) if isinstance(t, torch.Tensor) else t
+            for t in state["torch_cuda"][:devices]
+        ]
+        for i, s in enumerate(cuda_states):
+            torch.cuda.set_rng_state(s, i)

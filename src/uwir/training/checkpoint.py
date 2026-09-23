@@ -25,4 +25,13 @@ def load_checkpoint(
     missing = required - payload.keys()
     if missing:
         raise ValueError(f"Incomplete checkpoint {path}: missing {sorted(missing)}")
+    if "rng_state" in payload and isinstance(payload["rng_state"], dict):
+        rng = payload["rng_state"]
+        if "torch_cpu" in rng and isinstance(rng["torch_cpu"], torch.Tensor):
+            rng["torch_cpu"] = rng["torch_cpu"].to(device="cpu", dtype=torch.uint8)
+        if "torch_cuda" in rng and isinstance(rng["torch_cuda"], (list, tuple)):
+            rng["torch_cuda"] = [
+                t.to(device="cpu", dtype=torch.uint8) if isinstance(t, torch.Tensor) else t
+                for t in rng["torch_cuda"]
+            ]
     return payload
