@@ -107,4 +107,16 @@ def token_file_paths(token_dir: Any):
 
 def resolve_tool_path(path: Any) -> Path:
     p = Path(path)
-    return p if p.is_absolute() else ROOT / p
+    if not p.is_absolute():
+        p = ROOT / p
+    if not p.exists():
+        s = str(p)
+        if s.startswith("D:/") or s.startswith("D:\\"):
+            wsl_p = Path("/mnt/d" + s[2:].replace("\\", "/"))
+            if wsl_p.exists():
+                return wsl_p
+        elif s.startswith("/mnt/d/"):
+            win_p = Path("D:/" + s[7:])
+            if win_p.exists():
+                return win_p
+    return p

@@ -24,7 +24,19 @@ def run(command):
     line = "+ " + (" ".join(command) if isinstance(command, list) else str(command))
     write_log(line)
     with LOG_PATH.open("a", encoding="utf-8") as f:
-        proc = subprocess.run(command, stdout=f, stderr=subprocess.STDOUT, text=True, shell=isinstance(command, str))
+        proc = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            shell=isinstance(command, str),
+        )
+        for out_line in proc.stdout:
+            print(out_line, end="", flush=True)
+            f.write(out_line)
+            f.flush()
+        proc.wait()
     if proc.returncode != 0:
         raise RuntimeError(f"Command failed with code {proc.returncode}: {line}")
 
@@ -46,6 +58,34 @@ try:
     os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
     write_log("PYTHONPATH=" + os.environ["PYTHONPATH"])
 
+{% if code_bundle_b64 %}
+    import base64
+    import io
+    import tarfile
+    write_log("Unpacking local code bundle over repository...")
+    bundle_data = base64.b64decode("{{ code_bundle_b64 }}")
+    with tarfile.open(fileobj=io.BytesIO(bundle_data), mode="r:gz") as tar:
+        tar.extractall(path=str(REPO_DIR))
+    write_log("Code bundle successfully extracted.")
+{% endif %}
+
+    # Locate and link UIEB dataset automatically under /kaggle/working/datasets/UIEB
+    uieb_raw_candidates = list(Path("/kaggle/input").glob("**/raw-890"))
+    uieb_ref_candidates = list(Path("/kaggle/input").glob("**/reference-890"))
+    if uieb_raw_candidates and uieb_ref_candidates:
+        uieb_dir = Path("/kaggle/working/datasets/UIEB")
+        uieb_dir.mkdir(parents=True, exist_ok=True)
+        raw_symlink = uieb_dir / "raw-890"
+        ref_symlink = uieb_dir / "reference-890"
+        if not raw_symlink.exists():
+            os.symlink(str(uieb_raw_candidates[0]), str(raw_symlink))
+        if not ref_symlink.exists():
+            os.symlink(str(uieb_ref_candidates[0]), str(ref_symlink))
+        os.environ["UIEB_ROOT"] = str(uieb_dir)
+        write_log(f"UIEB dataset located and linked at: {uieb_dir}")
+    else:
+        write_log("[WARNING] UIEB raw/reference dataset not directly found under /kaggle/input")
+
     # Locate EUVP dataset automatically under /kaggle/input
     candidates = [
         Path("/kaggle/input/euvp-dataset/EUVP"),
@@ -57,6 +97,10 @@ try:
         matches = list(Path("/kaggle/input").glob("**/EUVP/test_samples"))
         if matches:
             euvp_root = matches[0].parent
+        else:
+            matches2 = list(Path("/kaggle/input").glob("**/test_samples"))
+            if matches2:
+                euvp_root = matches2[0].parent
     if euvp_root is not None:
         os.environ["EUVP_ROOT"] = str(euvp_root)
         os.environ["DATA_ROOT"] = str(euvp_root)
@@ -64,23 +108,14 @@ try:
     else:
         write_log("[WARNING] EUVP dataset not directly found under /kaggle/input")
 
-    # Locate UIEB dataset automatically under /kaggle/input
-    uieb_candidates = [
-        Path("/kaggle/input/uieb-dataset/UIEB"),
-        Path("/kaggle/input/uieb-dataset"),
-        Path("/kaggle/input/larjeck/uieb-dataset-raw"),
-    ]
-    uieb_root = next((p for p in uieb_candidates if (p / "raw-890").exists()), None)
-    if uieb_root is None:
-        raw_matches = list(Path("/kaggle/input").glob("**/raw-890"))
-        if raw_matches:
-            uieb_root = raw_matches[0].parent
-    if uieb_root is not None:
-        os.environ["UIEB_ROOT"] = str(uieb_root)
-        os.environ["DATA_UIEB"] = str(uieb_root)
-        write_log(f"UIEB dataset located at: {uieb_root}")
+    # Locate Checkpoints dataset automatically under /kaggle/input if present
+    ckpt_matches = list(Path("/kaggle/input").glob("**/best_model.pth"))
+    if ckpt_matches:
+        ckpt_dir = ckpt_matches[0].parent.parent
+        os.environ["CKPT_DIR"] = str(ckpt_dir)
+        write_log(f"Checkpoints located at: {ckpt_dir} (found {len(ckpt_matches)} checkpoints)")
     else:
-        write_log("[WARNING] UIEB dataset not directly found under /kaggle/input")
+        write_log("[WARNING] No best_model.pth found under /kaggle/input")
 
 {% for command in setup_commands %}
     run({{ command }})
@@ -96,9 +131,16 @@ except Exception:
     write_log(traceback.format_exc())
     raise
 finally:
+    if (REPO_DIR / "checkpoints").exists() and not Path("/kaggle/working/checkpoints").exists():
+        import shutil
+        try:
+            shutil.copytree(str(REPO_DIR / "checkpoints"), "/kaggle/working/checkpoints", dirs_exist_ok=True)
+        except Exception:
+            pass
     os.chdir("/kaggle/working")
     run([
         "bash",
         "-lc",
         f"cd /kaggle/working && zip -qr {SLUG}.zip checkpoints results results_* job_debug_{SLUG}.log *.args || true",
     ])
+

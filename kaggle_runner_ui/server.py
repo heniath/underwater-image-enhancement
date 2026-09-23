@@ -249,6 +249,8 @@ async def get_jobs_status(project_name: str, force_refresh: bool = False):
                 st_text = "RUNNING"
             elif "QUEUED" in raw_upper:
                 st_text = "QUEUED"
+            elif "NOT FOUND" in raw_upper or "404" in raw_upper:
+                st_text = "IDLE"
             elif "ERROR" in raw_upper or "FAILED" in raw_upper:
                 st_text = "ERROR"
             else:

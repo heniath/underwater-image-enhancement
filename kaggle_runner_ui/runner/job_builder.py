@@ -94,6 +94,20 @@ def build_context(
     rendered_run_commands = [render_command(command, variables) for command in raw_run_commands]
     install_commands = [f"python -m pip install -q -r {path}" for path in job.get("install_files", [])]
 
+    local_code_dir = job.get("local_code_dir") or project.get("local_code_dir")
+    code_bundle_b64 = ""
+    if local_code_dir:
+        dir_p = resolve_tool_path(local_code_dir)
+        src_p = dir_p / "src"
+        if src_p.exists():
+            import base64
+            import io
+            import tarfile
+            buf = io.BytesIO()
+            with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+                tar.add(str(src_p), arcname="src")
+            code_bundle_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+
     return {
         "username": account["username"],
         "slug": slug,
@@ -102,6 +116,7 @@ def build_context(
         "repo_url": repo_url,
         "machine_shape": job.get("machine_shape", project.get("machine_shape", "NvidiaTeslaT4")),
         "dataset_sources": dataset_sources,
+        "code_bundle_b64": code_bundle_b64,
         "setup_commands": [command_to_list(cmd) for cmd in setup_commands],
         "install_commands": [command_to_list(cmd) for cmd in install_commands],
         "run_commands": [command_to_list(cmd) for cmd in rendered_run_commands],
