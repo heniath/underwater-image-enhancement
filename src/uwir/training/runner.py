@@ -6,6 +6,7 @@ import csv
 import json
 import platform
 import subprocess
+import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -185,6 +186,10 @@ def run_reference_experiment(
     if (run_dir / "test_metrics.json").exists() and existing_config_path.exists() and resume:
         existing_config = json.loads(existing_config_path.read_text(encoding="utf-8"))
         if existing_config.get("completed"):
+            print(
+                f"[{'SMOKE' if smoke else 'FULL'}] {dataset_name} | {method_name} | seed={model_seed} already completed. Skipping.",
+                flush=True,
+            )
             return json.loads((run_dir / "test_metrics.json").read_text(encoding="utf-8"))
     adapter = REFERENCE_METHODS[method_name](device, amp=config.amp)
     repo = repository_state(Path(repository_root))
@@ -232,8 +237,16 @@ def run_reference_experiment(
         if state.get("rng_state"):
             restore_rng_state(state["rng_state"])
 
+    mode_str = "SMOKE" if smoke else "FULL"
+    print(
+        f"\n[{mode_str}] >>> Starting {dataset_name} | {method_name} | seed={model_seed} | "
+        f"epochs={epochs} (start={start_epoch}) | physical_bs={physical} | device={device}",
+        flush=True,
+    )
+
     adapter.zero_grad()
     for epoch in range(start_epoch, epochs + 1):
+        epoch_t0 = time.time()
         # An epoch-specific seed makes sample order and worker-side paired
         # augmentation invariant to whether earlier epochs ran in this process.
         train_loader = _loader(
@@ -248,12 +261,21 @@ def run_reference_experiment(
         if limit_batches is None and not smoke and accumulation > 1:
             limit_batches = (len(train_loader) // accumulation) * accumulation
 
+        total_batches = limit_batches if limit_batches is not None else len(train_loader)
         logs = []
         for batch_index, batch in enumerate(train_loader):
             if limit_batches is not None and batch_index >= limit_batches:
                 break
             update = (batch_index + 1) % accumulation == 0
-            logs.append(adapter.train_step(batch, accumulation_steps=accumulation, update=update))
+            step_log = adapter.train_step(batch, accumulation_steps=accumulation, update=update)
+            logs.append(step_log)
+            if not smoke and ((batch_index + 1) % 100 == 0 or (batch_index + 1) == total_batches):
+                step_loss = step_log.get("loss", 0.0)
+                print(
+                    f"  [{dataset_name}-{method_name}-s{model_seed}] Ep {epoch:3d}/{epochs:3d} | "
+                    f"Batch {batch_index + 1:4d}/{total_batches:4d} | step_loss={step_loss:.4f}",
+                    flush=True,
+                )
         if not logs:
             raise ValueError("No training batches were processed")
         # Smoke mode may intentionally cap before an accumulation boundary; force callers to provide enough batches.
@@ -272,8 +294,10 @@ def run_reference_experiment(
             "validation": {key: value for key, value in validation.items() if key != "per_image"},
         }
         history.append(epoch_record)
+        is_best = False
         if validation["psnr"] > best_psnr:
             best_psnr, best_epoch = validation["psnr"], epoch
+            is_best = True
             save_checkpoint(
                 run_dir / "best_model.pth",
                 _checkpoint_payload(adapter, epoch, best_psnr, best_epoch, history, run_config),
@@ -284,6 +308,24 @@ def run_reference_experiment(
         )
         _json(run_dir / "history.json", history)
 
+        elapsed = time.time() - epoch_t0
+        train_loss = epoch_record["train"].get("loss", next(iter(epoch_record["train"].values()), 0.0))
+        val_psnr = validation.get("psnr", 0.0)
+        val_ssim = validation.get("ssim", 0.0)
+        best_tag = " [*BEST*]" if is_best else ""
+        print(
+            f"[{mode_str}][{dataset_name}|{method_name}|s{model_seed}] "
+            f"Epoch {epoch:3d}/{epochs:3d} ({elapsed:5.1f}s) | "
+            f"train_loss={train_loss:.4f} | val_psnr={val_psnr:.2f}dB val_ssim={val_ssim:.4f} "
+            f"(best={best_psnr:.2f}dB @ ep {best_epoch}){best_tag}",
+            flush=True,
+        )
+
+    print(
+        f"[{mode_str}][{dataset_name}|{method_name}|s{model_seed}] "
+        f"Training complete. Evaluating test set with best checkpoint (ep {best_epoch})...",
+        flush=True,
+    )
     best_path = run_dir / "best_model.pth"
     if not best_path.exists() and last_path.exists():
         best_path = last_path
@@ -294,6 +336,12 @@ def run_reference_experiment(
     run_config["completed"] = True
     run_config["best_epoch"] = best_epoch
     _json(run_dir / "run_config.json", run_config)
+    print(
+        f"[{mode_str}][{dataset_name}|{method_name}|s{model_seed}] "
+        f"FINAL TEST RESULT: PSNR={test_metrics['psnr']:.2f}dB | SSIM={test_metrics['ssim']:.4f} | "
+        f"UCIQE={test_metrics.get('uciqe', 0.0):.4f} | UIQM={test_metrics.get('uiqm', 0.0):.4f}\n",
+        flush=True,
+    )
     row = {
         "dataset": dataset_name.upper(),
         "method": method_name,

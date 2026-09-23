@@ -141,6 +141,11 @@ def main(argv=None) -> int:
     if args.full and not _smoke_complete(output_root):
         raise RuntimeError("All dataset x method smoke combinations must pass before --full")
     seeds = [0] if args.smoke else args.seeds
+    print(
+        f"\n>>> Running benchmark [mode={'SMOKE' if args.smoke else 'FULL'}]: "
+        f"datasets={list(discovered.keys())}, methods={args.methods}, seeds={seeds}\n",
+        flush=True,
+    )
     for dataset_name, datasets in discovered.items():
         for method in args.methods:
             for seed in seeds:
@@ -160,9 +165,11 @@ def main(argv=None) -> int:
                     resume=True,
                 )
     if args.full:
+        print(f"\n>>> Aggregating full results into {output_root / 'aggregate_results.csv'}...", flush=True)
         aggregate_results(
             output_root / "per_run_results.csv", output_root / "aggregate_results.csv"
         )
+        print(">>> All assigned full runs completed successfully!", flush=True)
     if args.efficiency:
         _write_efficiency(output_root, args.device)
     return 0
