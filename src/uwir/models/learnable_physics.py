@@ -88,14 +88,19 @@ class LearnableLatentUNet(nn.Module):
 
     supports_physics_loss = True
 
-    def __init__(self, extractor_width: int = 32, transmission_minimum: float = 0.1):
+    def __init__(
+        self,
+        extractor_width: int = 32,
+        transmission_minimum: float = 0.1,
+        enhancer: nn.Module | None = None,
+    ):
         super().__init__()
         self.transmission_extractor = _TransmissionExtractor(
             width=extractor_width,
             minimum=transmission_minimum,
         )
         self.background_extractor = _BackgroundLightExtractor(width=extractor_width)
-        self.enhancer = UNet5ch(in_channels=9)
+        self.enhancer = enhancer if enhancer is not None else UNet5ch(in_channels=9)
 
     def forward(
         self,
@@ -183,11 +188,11 @@ class ParameterizedPhysicsUNet(nn.Module):
 
     supports_physics_loss = True
 
-    def __init__(self, extractor_width: int = 32):
+    def __init__(self, extractor_width: int = 32, enhancer: nn.Module | None = None):
         super().__init__()
         self.depth_extractor = _DepthExtractor(width=extractor_width)
         self.water_extractor = _WaterParameterExtractor(width=extractor_width)
-        self.enhancer = UNet5ch(in_channels=9)
+        self.enhancer = enhancer if enhancer is not None else UNet5ch(in_channels=9)
 
     def forward(
         self,

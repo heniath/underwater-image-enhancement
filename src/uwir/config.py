@@ -187,6 +187,8 @@ def option():
             "  V2: 6ch_b=RGB+B_RGB | 7ch=RGB+t(x)+B_RGB\n"
             "  End-to-end: learnable_latent_unet predicts unconstrained T/B; "
             "parameterized_physics_unet derives T=exp(-beta*d)\n"
+            "  Mobile end-to-end: learnable_latent_mobilenet_unet | "
+            "parameterized_physics_mobilenet_unet\n"
             "  Backbones: unet | uwlyt | uwlyttiny | uwlytv2 | uwlytv2tiny"
         ),
     )

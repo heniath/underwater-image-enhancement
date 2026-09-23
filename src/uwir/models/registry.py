@@ -41,13 +41,27 @@ ALL_MODEL_NAMES = [
     for variant in variants
 ]
 ALL_MODEL_NAMES.extend(
-    ("learnable_physics_unet", "learnable_latent_unet", "parameterized_physics_unet")
+    (
+        "learnable_physics_unet",
+        "learnable_latent_unet",
+        "parameterized_physics_unet",
+        "learnable_latent_mobilenet_unet",
+        "parameterized_physics_mobilenet_unet",
+    )
 )
+
+_END_TO_END_MODELS = {
+    "learnable_physics_unet",
+    "learnable_latent_unet",
+    "parameterized_physics_unet",
+    "learnable_latent_mobilenet_unet",
+    "parameterized_physics_mobilenet_unet",
+}
 
 
 def parse_model_variant(name: str) -> ModelSpec:
     """Parse ``<backbone>_<input variant>`` into its input contract."""
-    if name in ("learnable_physics_unet", "learnable_latent_unet", "parameterized_physics_unet"):
+    if name in _END_TO_END_MODELS:
         return ModelSpec(name, 3, "none")
     for backbone, variants in _BACKBONE_VARIANTS.items():
         prefix = f"{backbone}_"
@@ -74,6 +88,18 @@ def build_model(name: str, pretrained_backbone: bool = False) -> nn.Module:
         from .learnable_physics import ParameterizedPhysicsUNet
 
         return ParameterizedPhysicsUNet()
+
+    if backbone == "learnable_latent_mobilenet_unet":
+        from .learnable_physics import LearnableLatentUNet
+        from .mobilenet_unet import MobileNetUNet
+
+        return LearnableLatentUNet(enhancer=MobileNetUNet(in_channels=9))
+
+    if backbone == "parameterized_physics_mobilenet_unet":
+        from .learnable_physics import ParameterizedPhysicsUNet
+        from .mobilenet_unet import MobileNetUNet
+
+        return ParameterizedPhysicsUNet(enhancer=MobileNetUNet(in_channels=9))
 
     if backbone == "unet":
         from .unet import UNet5ch
